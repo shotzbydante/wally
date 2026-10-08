@@ -1,7 +1,8 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  /* config options here */
+  // Workspace packages ship TypeScript source; Next compiles them.
+  transpilePackages: ["@wally/core"],
   cacheComponents: true,
   partialPrefetching: true,
   turbopack: {

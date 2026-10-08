@@ -25,6 +25,12 @@ Run from the repo root (npm workspaces, Node 22):
 
 Run test, typecheck and lint before committing.
 
+## Deploy and CI
+
+- Hosting is Vercel. The Vercel project's Root Directory is `apps/web`; config is in `apps/web/vercel.json`. Pushes to `main` deploy to production, other branches get preview deployments.
+- GitHub Actions (`.github/workflows/ci.yml`) runs test, typecheck, lint and build on every push to `main` and every pull request.
+- Environment variables are set in the Vercel project settings, mirrored in `.env.example`.
+
 ## Rules that are not negotiable
 
 These come from the PRD and exist because of real failures at competitors.
