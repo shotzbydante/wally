@@ -50,7 +50,11 @@ These come from the PRD and exist because of real failures at competitors.
 
 - Tokens live in `apps/web/src/app/globals.css`: cool paper background, vest-navy ink, green accents, all drawn from the character art. Display face is Fredoka, text face is Figtree (self-hosted via `@fontsource-variable`).
 - Wally renders through `src/components/Wally.tsx`. The page background must stay `--paper`, which matches the image backdrop.
-- Onboarding is `/join` (`src/components/JoinFlow.tsx`): Wally speaks each step in a speech bubble and the form is his order pad. It does not save anything yet; the last step needs `NEXT_PUBLIC_WALLY_NUMBER`.
+- Onboarding is `/join` (`src/components/JoinFlow.tsx`): name, mobile and ZIP, text consent, then a 6-digit code. Wally speaks each step in a speech bubble and the form is his order pad.
+- Verification: `/api/verify/start` and `/api/verify/check` call Twilio Verify (`src/lib/server/verify.ts`). On success a signed, httpOnly session cookie is set (`src/lib/server/session.ts`) and `/account` reads it. There is no database yet, so the cookie carries the sign-up details and the account exists only on that device.
+- Needs `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_VERIFY_SERVICE_SID` and `SESSION_SECRET`. Without them the API answers 503 and the UI says verification isn't switched on. `WALLY_DEV_VERIFY_CODE` is a local-only stand-in, ignored in Vercel production.
+- Motion classes are in `globals.css`. Anything that transforms Wally must also be listed in the `mix-blend-mode: darken` rule, or a box appears around him.
+- Tailwind runs through PostCSS (`postcss.config.mjs`), and the Turbopack build cache is off, after a cached Vercel build shipped stale styles.
 
 ## Conventions
 

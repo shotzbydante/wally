@@ -5,13 +5,10 @@ const nextConfig: NextConfig = {
   transpilePackages: ["@wally/core"],
   cacheComponents: true,
   partialPrefetching: true,
-  turbopack: {
-    rules: {
-      "*.css": {
-        loaders: ["@tailwindcss/turbopack"],
-        as: "*.css",
-      },
-    },
+  experimental: {
+    // A build restored from Vercel's cache once shipped stale styles.
+    // Builds are quick, so always compile from scratch.
+    turbopackFileSystemCacheForBuild: false,
   },
 };
 

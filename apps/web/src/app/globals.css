@@ -52,8 +52,12 @@ body {
 
 /* Wally's render sits on the same backdrop colour as the page, so
    "darken" makes the edge of the image disappear. */
-.wally-img {
+/* Every animated wrapper around him needs it too: a transform starts a
+   new stacking group, and the blend has to carry through each one. */
+.wally-img, .wally-float, .wally-hop, .wally-enter {
   mix-blend-mode: darken;
+}
+.wally-img {
   user-select: none;
 }
 
@@ -78,4 +82,66 @@ body {
 .pad-rules {
   background-image:
     linear-gradient(to right, transparent 2.25rem, color-mix(in srgb, var(--red) 55%, transparent) 2.25rem, color-mix(in srgb, var(--red) 55%, transparent) calc(2.25rem + 1.5px), transparent calc(2.25rem + 1.5px));
+}
+
+/* ---------- Motion ---------- */
+
+/* Wally breathes a little while he waits. */
+@keyframes wally-float {
+  0%, 100% { transform: translateY(0) rotate(-0.6deg); }
+  50% { transform: translateY(-7px) rotate(0.6deg); }
+}
+.wally-float { animation: wally-float 4.2s ease-in-out infinite; transform-origin: 50% 90%; }
+
+/* Landing: one arrival sequence. */
+@keyframes arrive {
+  from { opacity: 0; transform: translateY(14px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes wally-enter {
+  0% { opacity: 0; transform: translateX(60px) rotate(6deg); }
+  70% { opacity: 1; transform: translateX(-6px) rotate(-1.5deg); }
+  100% { opacity: 1; transform: none; }
+}
+@keyframes sent {
+  0% { opacity: 0; transform: translateY(12px) scale(0.9); }
+  70% { opacity: 1; transform: translateY(-2px) scale(1.02); }
+  100% { opacity: 1; transform: none; }
+}
+.arrive { animation: arrive 520ms cubic-bezier(0.2, 0.7, 0.2, 1) both; animation-delay: var(--d, 0ms); }
+.wally-enter { animation: wally-enter 760ms cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+.sent { animation: sent 420ms cubic-bezier(0.2, 0.8, 0.2, 1) both; animation-delay: var(--d, 0ms); transform-origin: 0 100%; }
+
+/* Onboarding: the pad's contents slide in for each step. */
+@keyframes step-in {
+  from { opacity: 0; transform: translateX(16px); }
+  to { opacity: 1; transform: none; }
+}
+.step-in { animation: step-in 300ms cubic-bezier(0.2, 0.7, 0.2, 1) both; }
+
+/* Typing dots while Wally "writes" his next line. */
+@keyframes dot {
+  0%, 60%, 100% { transform: translateY(0); opacity: 0.45; }
+  30% { transform: translateY(-5px); opacity: 1; }
+}
+.dot { animation: dot 900ms ease-in-out infinite; animation-delay: var(--d, 0ms); }
+
+/* Verified tick. */
+@keyframes draw { to { stroke-dashoffset: 0; } }
+@keyframes pop {
+  0% { transform: scale(0.4); opacity: 0; }
+  70% { transform: scale(1.12); opacity: 1; }
+  100% { transform: scale(1); }
+}
+.tick { animation: pop 420ms cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+.tick path { stroke-dasharray: 30; stroke-dashoffset: 30; animation: draw 380ms 260ms ease-out forwards; }
+
+/* Buttons give a little under the finger. */
+.press { transition: transform 120ms ease, background-color 160ms ease; }
+.press:active { transform: scale(0.97); }
+
+@media (prefers-reduced-motion: reduce) {
+  .wally-float, .arrive, .wally-enter, .sent, .step-in, .dot, .tick, .tick path { animation: none; }
+  .tick path { stroke-dashoffset: 0; }
+  .press:active { transform: none; }
 }
