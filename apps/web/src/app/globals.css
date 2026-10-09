@@ -1,17 +1,81 @@
 @import "tailwindcss";
 
 :root {
-  --background: #faf8f3;
-  --foreground: #171717;
+  /* Drawn from Wally himself: his skin, vest, bow tie, horns, and the
+     studio backdrop he was rendered on. */
+  --paper: #f4f6fa;
+  --pad: #ffffff;
+  --ink: #161a2b;
+  --ink-soft: #596078;
+  --line: #dbe1ec;
+  --mint: #3cc28f;
+  --mint-wash: #dcf5e9;
+  --green: #0e7c57;
+  --green-deep: #0a5e42;
+  --butter: #f6d56b;
+  --red: #d8332a;
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
+  --color-paper: var(--paper);
+  --color-pad: var(--pad);
+  --color-ink: var(--ink);
+  --color-ink-soft: var(--ink-soft);
+  --color-line: var(--line);
+  --color-mint: var(--mint);
+  --color-mint-wash: var(--mint-wash);
+  --color-green: var(--green);
+  --color-green-deep: var(--green-deep);
+  --color-butter: var(--butter);
+  --color-red: var(--red);
+  --font-display: "Fredoka Variable", ui-rounded, system-ui, sans-serif;
+  --font-sans: "Figtree Variable", system-ui, -apple-system, sans-serif;
+}
+
+html {
+  background: var(--paper);
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: system-ui, -apple-system, sans-serif;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-size: 1.0625rem;
+  line-height: 1.5;
+}
+
+:focus-visible {
+  outline: 3px solid var(--mint);
+  outline-offset: 3px;
+  border-radius: 6px;
+}
+
+/* Wally's render sits on the same backdrop colour as the page, so
+   "darken" makes the edge of the image disappear. */
+.wally-img {
+  mix-blend-mode: darken;
+  user-select: none;
+}
+
+@keyframes wally-hop {
+  0% { transform: translateY(0) rotate(0); }
+  30% { transform: translateY(-14px) rotate(-2.5deg); }
+  60% { transform: translateY(0) rotate(1.5deg); }
+  100% { transform: translateY(0) rotate(0); }
+}
+@keyframes say {
+  from { opacity: 0; transform: translateY(6px) scale(0.98); }
+  to { opacity: 1; transform: none; }
+}
+.wally-hop { animation: wally-hop 520ms cubic-bezier(0.3, 0.7, 0.3, 1); transform-origin: 50% 90%; }
+.say { animation: say 260ms ease-out both; }
+
+@media (prefers-reduced-motion: reduce) {
+  .wally-hop, .say { animation: none; }
+}
+
+/* The order pad: ruled lines and a red margin, like the pad in his hand. */
+.pad-rules {
+  background-image:
+    linear-gradient(to right, transparent 2.25rem, color-mix(in srgb, var(--red) 55%, transparent) 2.25rem, color-mix(in srgb, var(--red) 55%, transparent) calc(2.25rem + 1.5px), transparent calc(2.25rem + 1.5px));
 }

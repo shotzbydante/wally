@@ -46,6 +46,12 @@ These come from the PRD and exist because of real failures at competitors.
 9. **Allergy and dietary data** live in a separately consented, separately deletable store.
 10. **Wally always identifies as an AI** and never starts a 1:1 thread with a non-member.
 
+## Web design
+
+- Tokens live in `apps/web/src/app/globals.css`: cool paper background, vest-navy ink, green accents, all drawn from the character art. Display face is Fredoka, text face is Figtree (self-hosted via `@fontsource-variable`).
+- Wally renders through `src/components/Wally.tsx`. The page background must stay `--paper`, which matches the image backdrop.
+- Onboarding is `/join` (`src/components/JoinFlow.tsx`): Wally speaks each step in a speech bubble and the form is his order pad. It does not save anything yet; the last step needs `NEXT_PUBLIC_WALLY_NUMBER`.
+
 ## Conventions
 
 - TypeScript strict. Money is integer cents.
