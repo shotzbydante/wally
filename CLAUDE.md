@@ -53,6 +53,9 @@ These come from the PRD and exist because of real failures at competitors.
 - Onboarding is `/join` (`src/components/JoinFlow.tsx`): name, mobile and ZIP, text consent, then a 6-digit code. Wally speaks each step in a speech bubble and the form is a plain white card.
 - Verification: `/api/verify/start` and `/api/verify/check` call Twilio Verify (`src/lib/server/verify.ts`). On success a signed, httpOnly session cookie is set (`src/lib/server/session.ts`) and `/account` reads it. There is no database yet, so the cookie carries the sign-up details and the account exists only on that device.
 - Needs `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_VERIFY_SERVICE_SID` and `SESSION_SECRET`. Without them the API answers 503 and the UI says verification isn't switched on. `WALLY_DEV_VERIFY_CODE` is a local-only stand-in, ignored in Vercel production.
+- Sign-in at `/signin`: Google OAuth (`/api/auth/google/*`) and emailed sign-in links through Resend (`/api/auth/email/*`). All three methods (phone, email, Google) merge into one session via `setSession`. Tokens are typed (`session`, `email-link`) so one can't be used as another. Email links are not single-use until there is a database.
+- `/account` is the settings-style profile: contact, name, sign-in methods, delivery apps, reservations, data privacy. Food services come from `src/lib/connectors.ts` and all show "Coming soon"; none may get a working Connect button until a sanctioned integration exists (rule 8). Use letter tiles, not third-party logos.
+- Needs `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `RESEND_API_KEY`, `EMAIL_FROM`. `WALLY_DEV_EMAIL_LINKS=1` shows the link on screen locally.
 - Motion classes are in `globals.css`. Anything that transforms Wally must also be listed in the `mix-blend-mode: darken` rule, or a box appears around him.
 - Tailwind runs through PostCSS (`postcss.config.mjs`), and the Turbopack build cache is off, after a cached Vercel build shipped stale styles.
 

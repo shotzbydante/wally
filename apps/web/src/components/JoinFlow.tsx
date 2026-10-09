@@ -334,8 +334,9 @@ export function JoinFlow({ wallyNumber }: { wallyNumber: string | null }) {
           </div>
         </div>
         <p className="mt-4 text-center text-[0.9rem] text-ink-soft">
-          <Link href="/" className="underline-offset-4 hover:underline">
-            What is Wally?
+          Already have an account, or prefer email?{" "}
+          <Link href="/signin" className="font-semibold text-green underline-offset-4 hover:underline">
+            Sign in
           </Link>
         </p>
       </section>

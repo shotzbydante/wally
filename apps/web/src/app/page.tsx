@@ -36,7 +36,10 @@ export default function Home() {
           >
             Meet Wally
           </Link>
-          <p className="text-[0.95rem] text-ink-soft">Takes about a minute. Wally is an AI.</p>
+          <Link href="/signin" className="font-semibold text-green underline-offset-4 hover:underline">
+            Sign in
+          </Link>
+          <p className="basis-full text-[0.95rem] text-ink-soft">Takes about a minute. Wally is an AI.</p>
         </div>
       </div>
 

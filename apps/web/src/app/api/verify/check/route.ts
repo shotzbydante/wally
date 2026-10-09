@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { SESSION_COOKIE, SESSION_MAX_AGE_SECONDS, encodeSession, sessionSecret } from "@/lib/server/session";
+import { sessionFromRequest, sessionSecret, setSession } from "@/lib/server/session";
 import { parseSignup } from "@/lib/server/signup-input";
 import { checkCode } from "@/lib/server/verify";
 
@@ -18,15 +18,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: result.reason }, { status });
   }
 
-  const now = Math.floor(Date.now() / 1000);
-  const token = encodeSession({ ...input, verifiedAt: now, exp: now + SESSION_MAX_AGE_SECONDS }, secret);
   const res = NextResponse.json({ ok: true });
-  res.cookies.set(SESSION_COOKIE, token, {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
-    sameSite: "lax",
-    path: "/",
-    maxAge: SESSION_MAX_AGE_SECONDS,
-  });
+  setSession(res, sessionFromRequest(request, secret), input, secret);
   return res;
 }
