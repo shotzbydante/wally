@@ -57,4 +57,5 @@ These come from the PRD and exist because of real failures at competitors.
 - TypeScript strict. Money is integer cents.
 - Tickets, confirmations and errors use neutral, exact language. Personality lives elsewhere, and never while money or a problem is on the table.
 - Don't use `next/font/google`; the build environment can't reach Google Fonts. Use system fonts or `next/font/local`.
+- Vercel installs only the web app's dependencies, not the root's. Anything `apps/web` imports at build time must be in `apps/web/package.json`. Test files are excluded from the web type check for this reason.
 - Never commit secrets. Add new env vars to `.env.example`.
