@@ -28,7 +28,7 @@
   --color-green-deep: var(--green-deep);
   --color-butter: var(--butter);
   --color-red: var(--red);
-  --font-display: "Fredoka Variable", ui-rounded, system-ui, sans-serif;
+  --font-display: "Figtree Variable", system-ui, -apple-system, sans-serif;
   --font-sans: "Figtree Variable", system-ui, -apple-system, sans-serif;
 }
 
@@ -76,12 +76,6 @@ body {
 
 @media (prefers-reduced-motion: reduce) {
   .wally-hop, .say { animation: none; }
-}
-
-/* The order pad: ruled lines and a red margin, like the pad in his hand. */
-.pad-rules {
-  background-image:
-    linear-gradient(to right, transparent 2.25rem, color-mix(in srgb, var(--red) 55%, transparent) 2.25rem, color-mix(in srgb, var(--red) 55%, transparent) calc(2.25rem + 1.5px), transparent calc(2.25rem + 1.5px));
 }
 
 /* ---------- Motion ---------- */

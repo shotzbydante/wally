@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { firstTextLink, formatUsPhone, isFirstName, isZip, normalizeUsPhone } from "./signup";
+import { cleanFirstName, firstTextLink, formatUsPhone, isFirstName, isZip, normalizeUsPhone } from "./signup";
 
 describe("normalizeUsPhone", () => {
   it("accepts common formats", () => {
@@ -33,6 +33,13 @@ describe("isZip / isFirstName", () => {
     expect(isFirstName("Mary-Jo")).toBe(true);
     expect(isFirstName("  ")).toBe(false);
     expect(isFirstName("x1")).toBe(false);
+  });
+});
+
+describe("cleanFirstName", () => {
+  it("capitalizes all-lowercase names and leaves others alone", () => {
+    expect(cleanFirstName("  dante ")).toBe("Dante");
+    expect(cleanFirstName("McKenna")).toBe("McKenna");
   });
 });
 

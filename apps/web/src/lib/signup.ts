@@ -28,8 +28,10 @@ export function isZip(value: string): boolean {
   return /^\d{5}$/.test(value.trim());
 }
 
+/** Trims, collapses spaces, and capitalizes a name typed all in lowercase. */
 export function cleanFirstName(value: string): string {
-  return value.trim().replace(/\s+/g, " ");
+  const name = value.trim().replace(/\s+/g, " ");
+  return name && name === name.toLowerCase() ? name.charAt(0).toUpperCase() + name.slice(1) : name;
 }
 
 export function isFirstName(value: string): boolean {

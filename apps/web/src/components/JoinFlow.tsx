@@ -162,7 +162,7 @@ export function JoinFlow({ wallyNumber }: { wallyNumber: string | null }) {
               key={step}
               ref={lineRef}
               tabIndex={-1}
-              className="say relative rounded-[1.6rem] rounded-bl-md bg-ink px-5 py-4 font-display text-[1.2rem] leading-snug font-medium text-white outline-none min-[900px]:ml-10 min-[900px]:rounded-[1.75rem] min-[900px]:rounded-bl-md min-[900px]:px-6 min-[900px]:py-5 min-[900px]:text-[1.6rem]"
+              className="say relative rounded-[1.6rem] rounded-bl-md bg-ink px-5 py-4 font-display text-[1.15rem] leading-snug font-semibold text-white outline-none min-[900px]:ml-10 min-[900px]:rounded-[1.75rem] min-[900px]:rounded-bl-md min-[900px]:px-6 min-[900px]:py-5 min-[900px]:text-[1.5rem]"
             >
               {lines[step]}
             </p>
@@ -175,23 +175,13 @@ export function JoinFlow({ wallyNumber }: { wallyNumber: string | null }) {
         </div>
       </section>
 
-      {/* The order pad */}
+      {/* The form card */}
       <section className="mx-auto mt-2 w-full max-w-[440px] min-[900px]:mt-0 min-[900px]:max-w-[460px] min-[900px]:flex-1" aria-label="Sign up">
         <div className="relative rounded-[1.25rem] bg-pad shadow-[0_1px_0_var(--line),0_18px_40px_-18px_rgba(22,26,43,0.28)]">
-          <PadBinding />
-          <div className="pad-rules rounded-b-[1.25rem] px-6 pt-5 pb-7 pl-[3.4rem] sm:pr-8">
+          <div className="px-6 pt-6 pb-7 sm:px-8 sm:pt-7 sm:pb-8">
             <Progress step={stepNumber} done={done} onBack={stepNumber > 1 || done ? back : undefined} backLabel={done ? "Start over" : "Back"} />
 
             <div key={step} className="step-in">
-              {/* What Wally has written down so far */}
-              {stepNumber > 1 && (
-                <dl className="mt-4 border-b border-line pb-3">
-                  <Noted label="Name" value={first} />
-                  {stepNumber > 2 && <Noted label="Mobile" value={formatUsPhone(phone)} tick={done} />}
-                  {stepNumber > 2 && <Noted label="ZIP" value={zip.trim()} />}
-                </dl>
-              )}
-
               {step === "name" && (
                 <form onSubmit={submitName} noValidate className="mt-5">
                   <Field label="First name" value={name} onChange={setName} error={errors.name} autoComplete="given-name" autoFocus />
@@ -297,7 +287,7 @@ export function JoinFlow({ wallyNumber }: { wallyNumber: string | null }) {
 
               {done && (
                 <div className="mt-5">
-                  <h2 className="flex items-center gap-3 font-display text-[1.7rem] leading-tight font-semibold">
+                  <h2 className="flex items-center gap-3 font-display text-[1.6rem] leading-tight font-bold tracking-[-0.01em]">
                     <Tick />
                     You’re verified.
                   </h2>
@@ -310,7 +300,7 @@ export function JoinFlow({ wallyNumber }: { wallyNumber: string | null }) {
                         <p className="text-[0.95rem] text-ink-soft">See what Wally has on his pad for you.</p>
                         <Link
                           href="/account"
-                          className="press mt-3 flex h-14 w-full items-center justify-center rounded-full bg-green font-display text-xl font-medium text-white hover:bg-green-deep"
+                          className="press mt-3 flex h-14 w-full items-center justify-center rounded-full bg-green font-display text-[1.125rem] font-semibold text-white hover:bg-green-deep"
                         >
                           Go to my account
                         </Link>
@@ -325,7 +315,7 @@ export function JoinFlow({ wallyNumber }: { wallyNumber: string | null }) {
                             <p className="text-[0.95rem] text-ink-soft">Opens your messages with “Hi Wally” ready to send.</p>
                             <a
                               href={firstTextLink(wallyNumber)}
-                              className="press mt-3 flex h-14 w-full items-center justify-center rounded-full border-2 border-green font-display text-xl font-medium text-green hover:bg-mint-wash"
+                              className="press mt-3 flex h-14 w-full items-center justify-center rounded-full border-2 border-green font-display text-[1.125rem] font-semibold text-green hover:bg-mint-wash"
                             >
                               Text Wally
                             </a>
@@ -357,7 +347,7 @@ function Progress({ step, done, onBack, backLabel }: { step: number; done: boole
   return (
     <div>
       <div className="flex items-baseline justify-between">
-        <p className="font-display text-[1.05rem] font-medium">{done ? "All 4 steps done" : `Step ${step} of ${TOTAL}`}</p>
+        <p className="text-[0.95rem] font-semibold text-ink-soft">{done ? "All 4 steps done" : `Step ${step} of ${TOTAL}`}</p>
         {onBack && (
           <button type="button" onClick={onBack} className="text-[0.95rem] font-medium text-green underline-offset-4 hover:underline">
             {backLabel}
@@ -374,16 +364,6 @@ function Progress({ step, done, onBack, backLabel }: { step: number; done: boole
           </span>
         ))}
       </div>
-    </div>
-  );
-}
-
-function PadBinding() {
-  return (
-    <div className="flex h-9 items-center justify-between rounded-t-[1.25rem] bg-ink px-7" aria-hidden="true">
-      {Array.from({ length: 9 }, (_, i) => (
-        <span key={i} className="block size-2.5 rounded-full bg-paper/90" />
-      ))}
     </div>
   );
 }
@@ -410,18 +390,6 @@ function Num({ n, muted = false }: { n: number; muted?: boolean }) {
   );
 }
 
-function Noted({ label, value, tick = false }: { label: string; value: string; tick?: boolean }) {
-  return (
-    <div className="flex items-baseline gap-3 py-1">
-      <dt className="w-20 shrink-0 text-[0.95rem] text-ink-soft">{label}</dt>
-      <dd className="min-w-0 font-display text-[1.15rem] font-medium break-words">
-        {value}
-        {tick && <span className="ml-2 font-sans text-[0.9rem] font-semibold text-green">Verified</span>}
-      </dd>
-    </div>
-  );
-}
-
 function FormError({ message }: { message?: string }) {
   if (!message) return null;
   return (
@@ -436,7 +404,7 @@ function Submit({ children, busy = false, busyLabel }: { children: ReactNode; bu
     <button
       type="submit"
       disabled={busy}
-      className="press mt-6 flex h-14 w-full items-center justify-center rounded-full bg-green font-display text-xl font-medium text-white hover:bg-green-deep disabled:opacity-70"
+      className="press mt-6 flex h-14 w-full items-center justify-center rounded-full bg-green font-display text-[1.125rem] font-semibold text-white hover:bg-green-deep disabled:opacity-70"
     >
       {busy ? busyLabel : children}
     </button>
@@ -479,7 +447,7 @@ function Field({
         onChange={(e) => onChange(e.target.value)}
         aria-invalid={error ? true : undefined}
         aria-describedby={describedBy}
-        className={`mt-1.5 h-14 w-full rounded-xl border-2 bg-pad px-4 font-display text-[1.35rem] font-medium transition-colors placeholder:font-normal placeholder:text-ink-soft/50 focus:border-green focus:outline-none ${
+        className={`mt-1.5 h-14 w-full rounded-xl border-2 bg-pad px-4 font-display text-[1.2rem] font-medium transition-colors placeholder:font-normal placeholder:text-ink-soft/50 focus:border-green focus:outline-none ${
           error ? "border-red" : "border-line"
         } ${inputClassName}`}
         {...input}

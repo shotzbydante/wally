@@ -12,7 +12,7 @@ export default function Home() {
   return (
     <main className="mx-auto flex w-full max-w-[1080px] flex-1 flex-col px-5 py-8 sm:px-8 min-[900px]:flex-row min-[900px]:items-center min-[900px]:gap-10 min-[900px]:py-12">
       <div className="order-2 min-[900px]:order-1 min-[900px]:flex-1">
-        <h1 className="arrive font-display text-[2.6rem] leading-[1.05] font-semibold tracking-[-0.01em] sm:text-6xl">
+        <h1 className="arrive font-display text-[2.6rem] leading-[1.05] font-bold tracking-[-0.025em] sm:text-6xl">
           Wally is a waiter you can text.
         </h1>
         <p className="arrive mt-5 max-w-[34rem] text-xl text-ink-soft" style={{ "--d": "120ms" } as CSSProperties}>
@@ -32,7 +32,7 @@ export default function Home() {
         <div style={{ "--d": "2100ms" } as CSSProperties} className="arrive mt-10 flex flex-wrap items-center gap-x-6 gap-y-3">
           <Link
             href="/join"
-            className="press inline-flex h-14 items-center rounded-full bg-green px-8 font-display text-xl font-medium text-white hover:bg-green-deep"
+            className="press inline-flex h-14 items-center rounded-full bg-green px-8 font-display text-[1.125rem] font-semibold text-white hover:bg-green-deep"
           >
             Meet Wally
           </Link>
