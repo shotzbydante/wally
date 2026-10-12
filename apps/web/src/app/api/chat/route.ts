@@ -6,8 +6,8 @@ import { beginTurn, clearMessages, loadMessages, saveReply, undoTurn } from "@/l
 import { DbError } from "@/lib/server/db";
 import { SESSION_COOKIE, sessionSecret } from "@/lib/server/session";
 
-// Claude can take a while on a long answer.
-export const maxDuration = 60;
+// A turn with web searches can take a while.
+export const maxDuration = 120;
 
 const json = (error: string, status: number) => NextResponse.json({ error }, { status });
 
@@ -76,7 +76,10 @@ export async function POST(request: Request) {
         } catch {}
       };
       try {
-        const answer = await reply(turn.messages, guest, "web", (chunk) => send({ type: "text", text: chunk }));
+        const answer = await reply(turn.messages, guest, "web", {
+          onText: (chunk) => send({ type: "text", text: chunk }),
+          onSearch: () => send({ type: "searching" }),
+        });
         const saved = await saveReply(who.id, "web", answer.content, answer.choices);
         send(saved ? { type: "done", message: saved } : { type: "error", error: "signed_out" });
       } catch (error) {

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type FormEvent, type KeyboardEvent } from "react";
 import { Wally } from "@/components/Wally";
-import { MAX_MESSAGE_CHARS, type ChatEvent, type ChatMessage, type Choice } from "@/lib/chat";
+import { MAX_MESSAGE_CHARS, hostOf, splitSources, type ChatEvent, type ChatMessage, type Choice } from "@/lib/chat";
 
 /** What Wally is doing, which drives how he moves and what his bubble says. */
 type Mood = "idle" | "thinking" | "speaking" | "sorry";
@@ -41,7 +41,7 @@ export function AskWally({ name, initial, ready }: { name: string; initial: Chat
   const [messages, setMessages] = useState(initial);
   const [draft, setDraft] = useState("");
   /** The person's message while Wally answers it, and his answer as it arrives. */
-  const [pending, setPending] = useState<{ text: string; answer: string } | null>(null);
+  const [pending, setPending] = useState<{ text: string; answer: string; searching: boolean } | null>(null);
   const [mood, setMood] = useState<Mood>("idle");
   const [error, setError] = useState<string | null>(null);
   // The greeting depends on the visitor's clock, so the server renders none
@@ -104,7 +104,7 @@ export function AskWally({ name, initial, ready }: { name: string; initial: Chat
     setConfirmClear(false);
     setDraft("");
     follow.current = true;
-    setPending({ text, answer: "" });
+    setPending({ text, answer: "", searching: false });
     setMood("thinking");
 
     let res: Response;
@@ -130,7 +130,10 @@ export function AskWally({ name, initial, ready }: { name: string; initial: Chat
       if (event.type === "text") {
         setMood("speaking");
         follow.current = nearBottom();
-        setPending((p) => (p ? { ...p, answer: p.answer + event.text } : p));
+        setPending((p) => (p ? { ...p, answer: p.answer + event.text, searching: false } : p));
+      } else if (event.type === "searching") {
+        setMood("thinking");
+        setPending((p) => (p ? { ...p, searching: true } : p));
       } else if (event.type === "done") {
         finished = true;
         const mine: ChatMessage = { id: event.message.id - 1, role: "user", channel: "web", content: text, choices: null, created_at: event.message.created_at };
@@ -198,8 +201,10 @@ export function AskWally({ name, initial, ready }: { name: string; initial: Chat
 
   const line = !ready
     ? "My line to the kitchen isn’t connected yet."
-    : mood === "thinking"
-      ? "One moment. Let me think."
+    : pending?.searching
+      ? "Let me see what’s out there."
+      : mood === "thinking"
+        ? "One moment. Let me think."
       : mood === "sorry"
         ? "My apologies. That didn’t go through."
         : empty
@@ -305,13 +310,16 @@ export function AskWally({ name, initial, ready }: { name: string; initial: Chat
           {pending && (
             <>
               <UserBubble text={pending.text} fresh />
-              {pending.answer ? (
-                <WallyTurn text={pending.answer} writing />
-              ) : (
-                <div className="say flex w-fit items-center gap-1.5 rounded-[1.35rem] rounded-bl-md bg-pad px-4 py-4 ring-1 ring-line ring-inset" aria-label="Wally is thinking">
+              {pending.answer && <WallyTurn text={pending.answer} writing={!pending.searching} />}
+              {(!pending.answer || pending.searching) && (
+                <div
+                  className="say flex w-fit items-center gap-1.5 rounded-[1.35rem] rounded-bl-md bg-pad px-4 py-4 ring-1 ring-line ring-inset"
+                  aria-label={pending.searching ? "Wally is searching the web" : "Wally is thinking"}
+                >
                   {[0, 150, 300].map((d) => (
                     <span key={d} className="dot size-2 rounded-full bg-green" style={{ "--d": `${d}ms` } as CSSProperties} />
                   ))}
+                  {pending.searching && <span className="ml-2 text-[0.95rem] leading-none text-ink-soft">Searching the web</span>}
                 </div>
               )}
             </>
@@ -353,13 +361,13 @@ export function AskWally({ name, initial, ready }: { name: string; initial: Chat
             </button>
           </form>
           <p className="mt-2 text-center text-[0.85rem] text-ink-soft">
-            Wally is an AI. He can’t place orders or book tables yet, and can’t see live menus, prices or hours.
+            Wally is an AI. He can search the web, but can’t place orders or book tables yet. Confirm hours and prices with the restaurant.
           </p>
         </div>
 
         {/* Screen readers hear each finished answer once, not every streamed word. */}
         <p className="sr-only" aria-live="polite">
-          {messages[messages.length - 1]?.role === "assistant" ? `Wally: ${messages[messages.length - 1]!.content}` : ""}
+          {messages[messages.length - 1]?.role === "assistant" ? `Wally: ${splitSources(messages[messages.length - 1]!.content).text}` : ""}
         </p>
       </section>
     </main>
@@ -404,12 +412,14 @@ function WallyTurn({
   live?: boolean;
   onPick?: (choice: Choice) => void;
 }) {
+  // Sources ride along in the text (see splitSources); here they become links.
+  const { text: said, sources } = splitSources(text);
   return (
     <div className="max-w-[92%]">
-      {text && (
+      {said && (
         <p className="w-fit rounded-[1.35rem] rounded-bl-md bg-pad px-4 py-3 break-words whitespace-pre-wrap ring-1 ring-line ring-inset">
           <span className="sr-only">Wally: </span>
-          {text}
+          {said}
           {writing && <span className="caret" aria-hidden="true" />}
           {byText && <ByText />}
         </p>
@@ -417,22 +427,51 @@ function WallyTurn({
       {choices && (
         <ul className="mt-2 grid gap-2 sm:grid-cols-2">
           {choices.map((c, i) => (
-            <li key={`${i}-${c.title}`} className={live ? "arrive" : undefined} style={{ "--d": `${i * 90}ms` } as CSSProperties}>
-              <button
-                type="button"
-                disabled={!live}
-                onClick={() => onPick?.(c)}
-                className="press flex h-full w-full items-start gap-3 rounded-2xl bg-pad p-3 text-left ring-1 ring-line transition-shadow ring-inset enabled:hover:ring-2 enabled:hover:ring-green disabled:opacity-70"
-              >
+            <li
+              key={`${i}-${c.title}`}
+              className={`flex flex-col overflow-hidden rounded-2xl bg-pad ring-1 ring-line transition-shadow ring-inset ${live ? "arrive hover:ring-2 hover:ring-green" : "opacity-70"}`}
+              style={{ "--d": `${i * 90}ms` } as CSSProperties}
+            >
+              <button type="button" disabled={!live} onClick={() => onPick?.(c)} className="press flex w-full flex-1 items-start gap-3 p-3 text-left">
                 <Tile>{c.emoji}</Tile>
                 <span className="min-w-0">
                   <span className="block leading-snug font-semibold">{c.title}</span>
                   {c.detail && <span className="mt-0.5 block text-[0.92rem] leading-snug text-ink-soft">{c.detail}</span>}
                 </span>
               </button>
+              {c.url && (
+                <a
+                  href={c.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center justify-between gap-2 border-t border-line px-3 py-2 text-[0.88rem] font-semibold text-green hover:bg-mint-wash"
+                >
+                  <span className="truncate">{hostOf(c.url)}</span>
+                  <span aria-hidden="true">↗</span>
+                  <span className="sr-only">(opens in a new tab)</span>
+                </a>
+              )}
             </li>
           ))}
         </ul>
+      )}
+      {sources.length > 0 && (
+        <p className="mt-2 flex flex-wrap items-center gap-x-1.5 gap-y-1.5 text-[0.85rem] text-ink-soft">
+          <span>From the web:</span>
+          {sources.map((source) => (
+            <a
+              key={source.url}
+              href={source.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              title={source.title}
+              className="inline-flex h-7 max-w-[14rem] items-center rounded-full bg-pad px-2.5 font-semibold text-green ring-1 ring-line ring-inset hover:ring-green"
+            >
+              <span className="truncate">{hostOf(source.url)}</span>
+              <span className="sr-only">: {source.title} (opens in a new tab)</span>
+            </a>
+          ))}
+        </p>
       )}
     </div>
   );
