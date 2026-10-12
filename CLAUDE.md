@@ -86,6 +86,12 @@ These come from the PRD and exist because of real failures at competitors.
 - Messages are plain text, no markdown, so the same words work in a text message. Sources ride inside the text as a closing "Sources:" block (`withSources` / `splitSources` in `src/lib/chat.ts`); the page lifts them out and shows them as links.
 - Open item: rule 9. People may mention allergies in conversation, and those messages are stored with the rest of the thread. A separately consented store is still to build before Wally remembers dietary needs.
 
+## When a page breaks
+
+- `src/app/error.tsx` and `src/app/global-error.tsx` both render `components/Recover.tsx`. The usual cause is a deploy landing while a page is open: the old page asks for script files the new version no longer has, and the load fails. `Recover` reloads the page once (at most once a minute, tracked in session storage), and only shows its message if that didn't help.
+- It also posts the error to `/api/client-error`, which writes it to the server log as `[client]`. Look there first when someone reports a broken page.
+- `Recover` uses inline styles because the app-wide error page renders without the site's stylesheet.
+
 ## Conventions
 
 - TypeScript strict. Money is integer cents.
