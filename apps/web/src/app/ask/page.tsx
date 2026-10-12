@@ -5,7 +5,6 @@ import { redirect } from "next/navigation";
 import { connection } from "next/server";
 import { Suspense } from "react";
 import { AskWally } from "@/components/AskWally";
-import { LocationBar } from "@/components/LocationBar";
 import { Notice, noticeAction } from "@/components/Notice";
 import { SignedInHeader } from "@/components/SignedInHeader";
 import type { ChatMessage } from "@/lib/chat";
@@ -75,9 +74,7 @@ async function Ask() {
   return (
     <>
       <SignedInHeader active="/ask" />
-      {/* Only once the places search is switched on: until then an address has no use. */}
-      {placesConfigured() && <LocationBar initial={loaded.account.address ?? null} />}
-      <AskWally name={loaded.account.name} initial={messages} ready={agentConfigured()} underBar={placesConfigured()} />
+      <AskWally name={loaded.account.name} initial={messages} ready={agentConfigured()} places={placesConfigured()} address={loaded.account.address ?? null} />
     </>
   );
 }

@@ -4,6 +4,7 @@ import { AgentError, agentConfigured, reply } from "@/lib/server/agent";
 import { loadAccount } from "@/lib/server/accounts";
 import { beginTurn, clearMessages, loadMessages, saveReply, undoTurn } from "@/lib/server/conversation";
 import { DbError } from "@/lib/server/db";
+import { placesConfigured } from "@/lib/server/places";
 import { SESSION_COOKIE, sessionSecret } from "@/lib/server/session";
 
 // A turn with web searches can take a while.
@@ -36,7 +37,12 @@ export async function GET(request: Request) {
   const who = await signedIn(request);
   if ("error" in who) return who.error;
   try {
-    return NextResponse.json({ messages: await loadMessages(who.id) });
+    return NextResponse.json({
+      messages: await loadMessages(who.id),
+      // The address bar reads these, so it is right even on a page that was loaded a while ago.
+      address: who.account.address ?? null,
+      places: placesConfigured(),
+    });
   } catch (error) {
     if (error instanceof DbError) return json("unavailable", 503);
     throw error;

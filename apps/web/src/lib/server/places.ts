@@ -129,7 +129,7 @@ export async function searchPlaces(search: PlaceSearch): Promise<Place[]> {
       ...(search.openNow ? { openNow: true } : {}),
       ...(!area && search.near ? { locationBias: { circle: { center: { latitude: search.near.lat, longitude: search.near.lng }, radius: NEARBY_RADIUS } } } : {}),
     },
-    ["id", "displayName", "shortFormattedAddress", "formattedAddress", "primaryTypeDisplayName", "location", "currentOpeningHours.openNow", "rating", "userRatingCount", "priceLevel", "websiteUri", "googleMapsUri", "businessStatus"],
+    ["id", "displayName", "shortFormattedAddress", "formattedAddress", "primaryTypeDisplayName", "location", "currentOpeningHours", "rating", "userRatingCount", "priceLevel", "websiteUri", "googleMapsUri", "businessStatus"],
   );
   return raw
     .filter((p) => p.id && p.displayName?.text && (!p.businessStatus || p.businessStatus === "OPERATIONAL"))

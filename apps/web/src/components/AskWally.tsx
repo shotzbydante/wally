@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type FormEvent, type KeyboardEvent } from "react";
+import { LocationBar } from "@/components/LocationBar";
 import { Wally } from "@/components/Wally";
 import { MAX_MESSAGE_CHARS, OPEN_BADGE_MINUTES, deliveryLinks, hostOf, splitSources, type ChatEvent, type ChatMessage, type Choice } from "@/lib/chat";
 
@@ -41,15 +42,19 @@ export function AskWally({
   name,
   initial,
   ready,
-  underBar = false,
+  places: placesAtLoad,
+  address: addressAtLoad,
 }: {
   name: string;
   initial: ChatMessage[];
   ready: boolean;
-  /** The address bar sits above, so Wally's column is that much shorter. */
-  underBar?: boolean;
+  /** The places search is switched on, so an address is worth asking for. */
+  places: boolean;
+  address: string | null;
 }) {
   const [messages, setMessages] = useState(initial);
+  const [places, setPlaces] = useState(placesAtLoad);
+  const [address, setAddress] = useState(addressAtLoad);
   const [draft, setDraft] = useState("");
   /** The person's message while Wally answers it, and his answer as it arrives. */
   const [pending, setPending] = useState<{ text: string; answer: string; searching: boolean } | null>(null);
@@ -74,13 +79,20 @@ export function AskWally({
     try {
       const res = await fetch("/api/chat", { cache: "no-store" });
       if (!res.ok) return;
-      const data = (await res.json()) as { messages: ChatMessage[] };
+      const data = (await res.json()) as { messages: ChatMessage[]; address?: string | null; places?: boolean };
+      if (typeof data.places === "boolean") setPlaces(data.places);
+      if (data.address !== undefined) setAddress(data.address);
       setMessages((current) => {
         const last = (list: ChatMessage[]) => list[list.length - 1]?.id;
         return current.length === data.messages.length && last(current) === last(data.messages) ? current : data.messages;
       });
     } catch {}
   }, []);
+  // And once on arrival: a page opened before a change went live should still catch up.
+  useEffect(() => {
+    const soon = setTimeout(() => void refresh(), 0);
+    return () => clearTimeout(soon);
+  }, [refresh]);
   useEffect(() => {
     const onReturn = () => {
       if (document.visibilityState === "visible" && !busy) void refresh();
@@ -226,12 +238,14 @@ export function AskWally({
   const lastId = messages[messages.length - 1]?.id;
 
   return (
+    <>
+    {places && <LocationBar saved={address} onChange={setAddress} />}
     <main className="mx-auto flex w-full max-w-[1080px] flex-1 flex-col px-5 sm:px-8 min-[900px]:flex-row min-[900px]:gap-12">
       {/* Wally: beside the conversation on wide screens, above it on narrow ones.
           A sticky box is its own stacking group, so on wide screens it must carry Wally's blend (see globals.css). */}
       <aside
-        className={`z-10 min-[900px]:mix-blend-darken min-[900px]:sticky min-[900px]:top-0 min-[900px]:flex ${underBar ? "min-[900px]:h-[calc(100dvh-7.75rem)]" : "min-[900px]:h-[calc(100dvh-4.25rem)]"} min-[900px]:w-[340px] min-[900px]:shrink-0 min-[900px]:flex-col min-[900px]:justify-center min-[900px]:pb-16 ${
-          empty ? "pt-4" : "sticky top-0 -mx-5 bg-paper/90 px-5 py-2 backdrop-blur sm:-mx-8 sm:px-8 min-[900px]:mx-0 min-[900px]:bg-transparent min-[900px]:px-0 min-[900px]:backdrop-blur-none"
+        className={`z-10 min-[900px]:mix-blend-darken min-[900px]:sticky min-[900px]:flex ${places ? "min-[900px]:top-[4.5rem] min-[900px]:h-[calc(100dvh-8.75rem)]" : "min-[900px]:top-0 min-[900px]:h-[calc(100dvh-4.25rem)]"} min-[900px]:w-[340px] min-[900px]:shrink-0 min-[900px]:flex-col min-[900px]:justify-center min-[900px]:pb-16 ${
+          empty ? "pt-4" : `sticky ${places ? "top-[4.5rem]" : "top-0"} -mx-5 bg-paper/90 px-5 py-2 backdrop-blur sm:-mx-8 sm:px-8 min-[900px]:mx-0 min-[900px]:bg-transparent min-[900px]:px-0 min-[900px]:backdrop-blur-none`
         }`}
       >
         <div className={`flex gap-2 min-[900px]:flex-col min-[900px]:gap-0 ${empty ? "items-end" : "items-center"}`}>
@@ -382,6 +396,7 @@ export function AskWally({
         </p>
       </section>
     </main>
+    </>
   );
 }
 
