@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type FormEvent, type KeyboardEvent } from "react";
 import { Wally } from "@/components/Wally";
-import { MAX_MESSAGE_CHARS, hostOf, splitSources, type ChatEvent, type ChatMessage, type Choice } from "@/lib/chat";
+import { MAX_MESSAGE_CHARS, OPEN_BADGE_MINUTES, deliveryLinks, hostOf, splitSources, type ChatEvent, type ChatMessage, type Choice } from "@/lib/chat";
 
 /** What Wally is doing, which drives how he moves and what his bubble says. */
 type Mood = "idle" | "thinking" | "speaking" | "sorry";
@@ -37,7 +37,18 @@ const nearBottom = () => window.innerHeight + window.scrollY >= document.documen
 const toBottom = (smooth: boolean) =>
   window.scrollTo({ top: document.documentElement.scrollHeight, behavior: smooth ? "smooth" : "instant" });
 
-export function AskWally({ name, initial, ready }: { name: string; initial: ChatMessage[]; ready: boolean }) {
+export function AskWally({
+  name,
+  initial,
+  ready,
+  underBar = false,
+}: {
+  name: string;
+  initial: ChatMessage[];
+  ready: boolean;
+  /** The address bar sits above, so Wally's column is that much shorter. */
+  underBar?: boolean;
+}) {
   const [messages, setMessages] = useState(initial);
   const [draft, setDraft] = useState("");
   /** The person's message while Wally answers it, and his answer as it arrives. */
@@ -219,7 +230,7 @@ export function AskWally({ name, initial, ready }: { name: string; initial: Chat
       {/* Wally: beside the conversation on wide screens, above it on narrow ones.
           A sticky box is its own stacking group, so on wide screens it must carry Wally's blend (see globals.css). */}
       <aside
-        className={`z-10 min-[900px]:mix-blend-darken min-[900px]:sticky min-[900px]:top-0 min-[900px]:flex min-[900px]:h-[calc(100dvh-4.25rem)] min-[900px]:w-[340px] min-[900px]:shrink-0 min-[900px]:flex-col min-[900px]:justify-center min-[900px]:pb-16 ${
+        className={`z-10 min-[900px]:mix-blend-darken min-[900px]:sticky min-[900px]:top-0 min-[900px]:flex ${underBar ? "min-[900px]:h-[calc(100dvh-7.75rem)]" : "min-[900px]:h-[calc(100dvh-4.25rem)]"} min-[900px]:w-[340px] min-[900px]:shrink-0 min-[900px]:flex-col min-[900px]:justify-center min-[900px]:pb-16 ${
           empty ? "pt-4" : "sticky top-0 -mx-5 bg-paper/90 px-5 py-2 backdrop-blur sm:-mx-8 sm:px-8 min-[900px]:mx-0 min-[900px]:bg-transparent min-[900px]:px-0 min-[900px]:backdrop-blur-none"
         }`}
       >
@@ -303,7 +314,7 @@ export function AskWally({ name, initial, ready }: { name: string; initial: Chat
             m.role === "user" ? (
               <UserBubble key={m.id} text={m.content} byText={m.channel === "text"} />
             ) : (
-              <WallyTurn key={m.id} text={m.content} byText={m.channel === "text"} choices={m.choices} live={m.id === lastId && !busy && ready} onPick={(c) => void send(c.reply)} />
+              <WallyTurn key={m.id} text={m.content} at={m.created_at} byText={m.channel === "text"} choices={m.choices} live={m.id === lastId && !busy && ready} onPick={(c) => void send(c.reply)} />
             ),
           )}
 
@@ -361,7 +372,7 @@ export function AskWally({ name, initial, ready }: { name: string; initial: Chat
             </button>
           </form>
           <p className="mt-2 text-center text-[0.85rem] text-ink-soft">
-            Wally is an AI. He can search the web, but can’t place orders or book tables yet. Confirm hours and prices with the restaurant.
+            Wally is an AI. He can’t place orders or book tables yet. Confirm hours and prices with the restaurant.
           </p>
         </div>
 
@@ -371,6 +382,35 @@ export function AskWally({ name, initial, ready }: { name: string; initial: Chat
         </p>
       </section>
     </main>
+  );
+}
+
+/** Open or closed, distance, rating and price: the facts about a place, from the listing. */
+function PlaceFacts({ place, fresh }: { place: NonNullable<Choice["place"]>; fresh: boolean }) {
+  const pill = "inline-flex h-6 items-center gap-1 rounded-full px-2 text-[0.8rem] font-semibold";
+  return (
+    <span className="mt-1 mb-1 flex flex-wrap items-center gap-1.5">
+      {fresh && place.open !== undefined && (
+        <span className={`${pill} ${place.open ? "bg-mint-wash text-green-deep" : "bg-line/70 text-ink-soft"}`}>{place.open ? "Open" : "Closed"}</span>
+      )}
+      {place.miles !== undefined && (
+        <span className={`${pill} bg-line/50 text-ink`}>
+          <svg viewBox="0 0 24 24" className="size-3.5" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M12 21s-7-6.200-7-11.500a7 7 0 0 1 14 0C19 14.800 12 21 12 21z" />
+            <circle cx="12" cy="9.5" r="2.5" />
+          </svg>
+          {place.miles} mi<span className="sr-only"> away</span>
+        </span>
+      )}
+      {place.rating !== undefined && (
+        <span className="text-[0.85rem] font-semibold text-ink-soft">
+          <span aria-hidden="true">★ </span>
+          {place.rating.toFixed(1)}
+          <span className="sr-only"> stars</span>
+        </span>
+      )}
+      {place.price && <span className="text-[0.85rem] font-semibold text-ink-soft">{place.price}</span>}
+    </span>
   );
 }
 
@@ -414,6 +454,7 @@ function UserBubble({ text, byText = false, fresh = false }: { text: string; byT
 
 function WallyTurn({
   text,
+  at,
   choices = null,
   byText = false,
   writing = false,
@@ -421,6 +462,8 @@ function WallyTurn({
   onPick,
 }: {
   text: string;
+  /** When Wally said it. */
+  at?: string;
   choices?: Choice[] | null;
   byText?: boolean;
   writing?: boolean;
@@ -430,6 +473,14 @@ function WallyTurn({
 }) {
   // Sources ride along in the text (see splitSources); here they become links.
   const { text: said, sources } = splitSources(text);
+  // "Open" was true when he answered; it isn't worth showing on an old message.
+  // It depends on the visitor's clock, so the server renders without it.
+  const fresh = useSyncExternalStore(
+    noSubscription,
+    () => at !== undefined && Date.now() - Date.parse(at) < OPEN_BADGE_MINUTES * 60_000,
+    () => false,
+  );
+  const places = choices?.some((c) => c.place) ?? false;
   return (
     <div className="max-w-[92%]">
       {said && (
@@ -452,9 +503,24 @@ function WallyTurn({
                 <Tile>{c.emoji}</Tile>
                 <span className="min-w-0">
                   <span className="block leading-snug font-semibold">{c.title}</span>
+                  {c.place && <PlaceFacts place={c.place} fresh={fresh} />}
                   {c.detail && <span className="mt-0.5 block text-[0.92rem] leading-snug text-ink-soft">{c.detail}</span>}
                 </span>
               </button>
+              {c.place && (
+                <p className="flex flex-wrap gap-x-3.5 gap-y-1 border-t border-line px-3 py-2 text-[0.88rem] font-semibold text-green">
+                  {[
+                    ...(c.place.website ? [{ label: "Website", url: c.place.website }] : []),
+                    ...deliveryLinks(c.title).map((d) => ({ label: d.app, url: d.url })),
+                    { label: "Map", url: c.place.maps },
+                  ].map((link) => (
+                    <a key={link.label} href={link.url} target="_blank" rel="noopener noreferrer" className="underline-offset-4 hover:underline">
+                      {link.label}
+                      <span className="sr-only"> for {c.title} (opens in a new tab)</span>
+                    </a>
+                  ))}
+                </p>
+              )}
               {c.url && (
                 <a
                   href={c.url}
@@ -470,6 +536,12 @@ function WallyTurn({
             </li>
           ))}
         </ul>
+      )}
+      {places && (
+        // Google's attribution rules for Places data shown without a map: the words "Google Maps", untranslated.
+        <p className="mt-1.5 text-[0.8125rem] whitespace-nowrap" style={{ fontFamily: "Roboto, sans-serif", fontWeight: 400, color: "#5E5E5E" }}>
+          <span translate="no">Google Maps</span>
+        </p>
       )}
       {sources.length > 0 && (
         <p className="mt-2 flex flex-wrap items-center gap-x-1.5 gap-y-1.5 text-[0.85rem] text-ink-soft">

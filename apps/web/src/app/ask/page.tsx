@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { connection } from "next/server";
 import { Suspense } from "react";
 import { AskWally } from "@/components/AskWally";
+import { LocationBar } from "@/components/LocationBar";
 import { Notice, noticeAction } from "@/components/Notice";
 import { SignedInHeader } from "@/components/SignedInHeader";
 import type { ChatMessage } from "@/lib/chat";
@@ -12,6 +13,7 @@ import { loadAccount } from "@/lib/server/accounts";
 import { agentConfigured } from "@/lib/server/agent";
 import { loadMessages } from "@/lib/server/conversation";
 import { DbError } from "@/lib/server/db";
+import { placesConfigured } from "@/lib/server/places";
 import { SESSION_COOKIE, sessionSecret } from "@/lib/server/session";
 
 export const metadata: Metadata = { title: "Ask Wally" };
@@ -73,7 +75,9 @@ async function Ask() {
   return (
     <>
       <SignedInHeader active="/ask" />
-      <AskWally name={loaded.account.name} initial={messages} ready={agentConfigured()} />
+      {/* Only once the places search is switched on: until then an address has no use. */}
+      {placesConfigured() && <LocationBar initial={loaded.account.address ?? null} />}
+      <AskWally name={loaded.account.name} initial={messages} ready={agentConfigured()} underBar={placesConfigured()} />
     </>
   );
 }

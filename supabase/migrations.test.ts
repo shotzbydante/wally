@@ -248,6 +248,28 @@ describe("conversation", () => {
   });
 });
 
+describe("address", () => {
+  const set = (id: string, address: string | null, lat: number | null, lng: number | null) =>
+    db.query<Account & { address: string | null; lat: number | null; lng: number | null }>("select * from public.wally_set_address($1, $2, $3, $4)", [id, address, lat, lng]);
+
+  it("saves, replaces and clears an address", async () => {
+    const a = await signIn({ email: "a@example.com" });
+    expect((await set(a.id, "5905 Wilshire Blvd, Los Angeles", 34.0639, -118.3592)).rows[0]).toMatchObject({ address: "5905 Wilshire Blvd, Los Angeles", lat: 34.0639, lng: -118.3592 });
+    expect(await get(a.id)).toMatchObject({ address: "5905 Wilshire Blvd, Los Angeles" });
+    expect((await set(a.id, null, null, null)).rows[0]).toMatchObject({ address: null, lat: null, lng: null });
+  });
+
+  it("refuses half an address, or coordinates off the map", async () => {
+    const a = await signIn({ email: "a@example.com" });
+    await expect(set(a.id, "Somewhere", null, null)).rejects.toThrow(/accounts_address_whole/);
+    await expect(set(a.id, "Somewhere", 134, -118)).rejects.toThrow(/lat/);
+  });
+
+  it("changes nothing for an account that is gone", async () => {
+    expect((await set("00000000-0000-0000-0000-000000000000", "Somewhere", 34, -118)).rows).toEqual([]);
+  });
+});
+
 describe("access", () => {
   it.each(["anon", "authenticated"])("is closed to the %s role, which the publishable key maps to", async (role) => {
     await db.exec("reset role");
@@ -259,6 +281,7 @@ describe("access", () => {
     await expect(db.query("select public.wally_messages(gen_random_uuid(), 10)")).rejects.toThrow(/permission denied/);
     await expect(db.query("select public.wally_chat_begin(gen_random_uuid(), 'web', 'hi', 100, 40)")).rejects.toThrow(/permission denied/);
     await expect(db.query("select public.wally_clear_messages(gen_random_uuid())")).rejects.toThrow(/permission denied/);
+    await expect(db.query("select * from public.wally_set_address(gen_random_uuid(), 'x', 1, 1)")).rejects.toThrow(/permission denied/);
     await expect(
       db.query("select * from public.wally_sign_in(null, 'x@example.com', false, null, null, null, null, false)"),
     ).rejects.toThrow(/permission denied/);

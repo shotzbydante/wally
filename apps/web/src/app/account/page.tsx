@@ -149,8 +149,8 @@ async function Account({ searchParams }: { searchParams: Query }) {
               <div className="min-w-0 flex-1">
                 <p className="font-semibold">Your details</p>
                 <p className="text-[0.95rem] text-ink-soft">
-                  Wally keeps your name, the sign-in methods above and your conversation with him, so they are here on
-                  any device you sign in from. Erasing deletes all of it for good.
+                  Wally keeps your name, the sign-in methods above, your saved address and your conversation with him, so
+                  they are here on any device you sign in from. Erasing deletes all of it for good.
                 </p>
               </div>
               <div className="mt-3 sm:mt-0 sm:shrink-0">

@@ -16,6 +16,9 @@ export interface Account {
   phone?: string;
   zip?: string;
   suggestions?: boolean;
+  /** Saved address, as the lookup spelled it, and where it is. */
+  address?: string;
+  near?: { lat: number; lng: number };
 }
 
 /** What a completed sign-in proved, plus anything typed during sign-up. */
@@ -36,6 +39,10 @@ interface Row {
   phone: string | null;
   zip: string | null;
   suggestions: boolean;
+  // Absent until the address migration has been run.
+  address?: string | null;
+  lat?: number | null;
+  lng?: number | null;
 }
 
 const fromRow = (row: Row): Account => ({
@@ -46,6 +53,8 @@ const fromRow = (row: Row): Account => ({
   phone: row.phone ?? undefined,
   zip: row.zip ?? undefined,
   suggestions: row.suggestions,
+  address: row.address ?? undefined,
+  near: typeof row.lat === "number" && typeof row.lng === "number" ? { lat: row.lat, lng: row.lng } : undefined,
 });
 
 function signInRow(identity: Identity, link: string | null, typed: boolean): Promise<Row> {
@@ -144,6 +153,20 @@ export async function loadAccount(token: string | undefined, secret: string | nu
 /** Null if the account no longer exists. Throws DbError if the database can't be reached. */
 export async function setAccountName(id: string, name: string): Promise<Account | null> {
   const [row] = await rpc<Row[]>("wally_set_name", { p_id: id, p_name: name });
+  return row ? fromRow(row) : null;
+}
+
+/**
+ * Saves the address, or clears it with null. Null result if the account no
+ * longer exists. Throws DbError if the database can't be reached.
+ */
+export async function setAccountAddress(id: string, saved: { address: string; point: { lat: number; lng: number } } | null): Promise<Account | null> {
+  const [row] = await rpc<Row[]>("wally_set_address", {
+    p_id: id,
+    p_address: saved?.address ?? null,
+    p_lat: saved?.point.lat ?? null,
+    p_lng: saved?.point.lng ?? null,
+  });
   return row ? fromRow(row) : null;
 }
 
