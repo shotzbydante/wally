@@ -26,7 +26,14 @@ export function NameForm({ initial }: { initial: string }) {
         setName(data.name);
         setSaved(data.name);
         router.refresh();
-      } else setError(res.status === 401 ? "You’ve been signed out. Sign in again to save." : "Use letters only, up to 60 characters.");
+      } else
+        setError(
+          res.status === 401
+            ? "You’ve been signed out. Sign in again to save."
+            : res.status === 503
+              ? "Wally’s records didn’t respond, so your name wasn’t saved. Try again in a moment."
+              : "Use letters only, up to 60 characters.",
+        );
     } catch {
       setError("Couldn’t reach Wally. Check your connection and try again.");
     }

@@ -8,6 +8,8 @@ const problems: Record<string, string> = {
   google_not_configured: "Google sign-in isn’t switched on yet.",
   google_failed: "Google sign-in didn’t complete. Try again.",
   link_expired: "That sign-in link has expired or isn’t valid. Send a new one.",
+  link_used: "That sign-in link has already been used. Send a new one.",
+  unavailable: "Wally’s records didn’t respond, so you weren’t signed in. Try again in a moment.",
   not_configured: "Email sign-in isn’t switched on yet, so no link was sent.",
   invalid_email: "Enter a valid email address.",
   provider_error: "The email service didn’t respond. Try again in a moment.",
@@ -16,6 +18,8 @@ const problems: Record<string, string> = {
 
 export function SignInForm() {
   const params = useSearchParams();
+  // From the account page: add the email or Google to the account already signed in.
+  const link = params.get("link") === "1";
   const [email, setEmail] = useState("");
   const [busy, setBusy] = useState(false);
   const [sentTo, setSentTo] = useState<string | null>(null);
@@ -30,7 +34,7 @@ export function SignInForm() {
       const res = await fetch("/api/auth/email/start", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email }),
+        body: JSON.stringify({ email, link }),
       });
       const data = (await res.json().catch(() => ({}))) as { error?: string; devLink?: string };
       if (!res.ok) setError(problems[data.error ?? ""] ?? problems.provider_error!);
@@ -74,7 +78,7 @@ export function SignInForm() {
   return (
     <div>
       <a
-        href="/api/auth/google/start"
+        href={link ? "/api/auth/google/start?link=1" : "/api/auth/google/start"}
         className="press flex h-14 w-full items-center justify-center gap-3 rounded-full border-2 border-line bg-pad text-[1.125rem] font-semibold hover:border-ink"
       >
         <GoogleMark />

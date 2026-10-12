@@ -24,6 +24,7 @@ const problems: Record<string, string> = {
   wrong_code: "That code doesn’t match. Check the text and try again.",
   expired: "That code has expired. Send a new one.",
   provider_error: "The text service didn’t respond. Try again in a moment.",
+  unavailable: "Wally’s records didn’t respond, so your number wasn’t saved. Send a new code in a moment.",
   invalid_input: "Some details look wrong. Go back and check them.",
   network: "Couldn’t reach Wally. Check your connection and try again.",
 };
@@ -126,7 +127,9 @@ export function JoinFlow({ wallyNumber }: { wallyNumber: string | null }) {
     e.preventDefault();
     if (!/^\d{6}$/.test(code)) return setErrors({ code: "Enter the 6-digit code from the text." });
     setBusy(true);
-    const error = await post("/api/verify/check", { ...details(), code });
+    // "?link=1" comes from the account page: add this number to the signed-in account.
+    const link = new URLSearchParams(window.location.search).get("link") === "1";
+    const error = await post("/api/verify/check", { ...details(), code, link });
     setBusy(false);
     if (error) return setErrors({ code: problems[error] ?? problems.provider_error! });
     go("ready");

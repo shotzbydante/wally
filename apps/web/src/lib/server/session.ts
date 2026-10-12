@@ -2,13 +2,16 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import type { NextResponse } from "next/server";
 
 /**
- * Signed cookies. Until there is a database, the session itself carries
- * the profile, so an account exists only on the device that signed in.
+ * Signed cookies. With a database (see accounts.ts) the session carries only
+ * the account id. Without one it carries the profile itself, so the account
+ * exists only in the browser that signed in.
  */
 export const SESSION_COOKIE = "wally_session";
 export const SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 30;
 
 export interface Session {
+  /** Account id in the database. Absent when the profile lives in the cookie. */
+  id?: string;
   name: string;
   /** Verified email, from an email link or Google. */
   email?: string;
@@ -65,19 +68,29 @@ export const encodeSession = (session: Session, secret: string) => signToken("se
 export const decodeSession = (token: string | undefined, secret: string, now?: number) =>
   readToken<Session>("session", token, secret, now);
 
-/** Merges new details into any existing session and sets the cookie. */
-export function setSession(res: NextResponse, current: Session | null, update: Partial<Session>, secret: string): void {
-  const exp = Math.floor(Date.now() / 1000) + SESSION_MAX_AGE_SECONDS;
-  const next: Session = { name: "", ...current, ...update, exp };
-  // Keep an existing name unless the update supplies a real one.
-  if (!update.name && current?.name) next.name = current.name;
-  res.cookies.set(SESSION_COOKIE, encodeSession(next, secret), {
+const newExpiry = () => Math.floor(Date.now() / 1000) + SESSION_MAX_AGE_SECONDS;
+
+function writeCookie(res: NextResponse, session: Session, secret: string): void {
+  res.cookies.set(SESSION_COOKIE, encodeSession(session, secret), {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
     sameSite: "lax",
     path: "/",
     maxAge: SESSION_MAX_AGE_SECONDS,
   });
+}
+
+/** Signs the browser in to an account in the database. */
+export function startSession(res: NextResponse, id: string, secret: string): void {
+  writeCookie(res, { id, name: "", exp: newExpiry() }, secret);
+}
+
+/** No database: merges new details into the profile kept in the cookie. */
+export function setSession(res: NextResponse, current: Session | null, update: Partial<Session>, secret: string): void {
+  const next: Session = { name: "", ...current, ...update, exp: newExpiry() };
+  // Keep an existing name unless the update supplies a real one.
+  if (!update.name && current?.name) next.name = current.name;
+  writeCookie(res, next, secret);
 }
 
 /** Reads the session from a request's Cookie header. */

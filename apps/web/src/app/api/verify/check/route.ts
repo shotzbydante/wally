@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { sessionFromRequest, sessionSecret, setSession } from "@/lib/server/session";
+import { signIn } from "@/lib/server/accounts";
+import { sessionSecret } from "@/lib/server/session";
 import { parseSignup } from "@/lib/server/signup-input";
 import { checkCode } from "@/lib/server/verify";
 
@@ -19,6 +20,9 @@ export async function POST(request: Request) {
   }
 
   const res = NextResponse.json({ ok: true });
-  setSession(res, sessionFromRequest(request, secret), input, secret);
+  // "link" comes from the account page: add this number to the signed-in account.
+  if (!(await signIn(res, request, input, secret, { link: body?.link === true, typed: true }))) {
+    return NextResponse.json({ error: "unavailable" }, { status: 503 });
+  }
   return res;
 }

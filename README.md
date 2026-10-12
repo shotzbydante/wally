@@ -20,6 +20,7 @@ npm test
 |---|---|
 | `apps/web` | Next.js web app |
 | `packages/core` | Connector interface and policy/approval engine |
+| `supabase/migrations` | Database schema (Supabase Postgres) |
 | `docs/product-brief.md` | Product requirements, condensed |
 | `CLAUDE.md` | Project guide for Claude Code |
 

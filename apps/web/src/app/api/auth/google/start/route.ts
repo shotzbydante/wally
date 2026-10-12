@@ -2,14 +2,15 @@ import { randomBytes } from "node:crypto";
 import { NextResponse } from "next/server";
 import { appOrigin, sessionSecret } from "@/lib/server/session";
 
-
 export async function GET(request: Request) {
   const origin = appOrigin(request);
   const clientId = process.env.GOOGLE_CLIENT_ID;
   if (!clientId || !process.env.GOOGLE_CLIENT_SECRET || !sessionSecret()) {
     return NextResponse.redirect(`${origin}/signin?error=google_not_configured`, 303);
   }
-  const state = randomBytes(24).toString("base64url");
+  // "?link=1" comes from the account page: add Google to the signed-in account.
+  const link = new URL(request.url).searchParams.get("link") === "1";
+  const state = randomBytes(24).toString("base64url") + (link ? ".link" : "");
   const url = new URL("https://accounts.google.com/o/oauth2/v2/auth");
   url.search = new URLSearchParams({
     client_id: clientId,

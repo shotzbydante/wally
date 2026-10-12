@@ -1,50 +1,61 @@
 import type { Metadata } from "next";
 import { cookies } from "next/headers";
 import Link from "next/link";
+import { redirect } from "next/navigation";
+import { connection } from "next/server";
 import { Suspense, type ReactNode } from "react";
+import { EraseButton } from "@/components/EraseButton";
 import { NameForm } from "@/components/NameForm";
 import { SiteHeader } from "@/components/SiteHeader";
 import { Wally } from "@/components/Wally";
 import { delivery, reservations, type FoodService } from "@/lib/connectors";
-import { SESSION_COOKIE, decodeSession, sessionSecret } from "@/lib/server/session";
+import { loadAccount } from "@/lib/server/accounts";
+import { SESSION_COOKIE, sessionSecret } from "@/lib/server/session";
 import { firstTextLink, formatUsPhone } from "@/lib/signup";
 
 export const metadata: Metadata = { title: "Your account" };
 
-export default function AccountPage() {
+type Query = Promise<{ problem?: string | string[] }>;
+
+export default function AccountPage({ searchParams }: { searchParams: Query }) {
   return (
     <Suspense fallback={<p className="p-8 text-ink-soft">Fetching your details…</p>}>
-      <Account />
+      <Account searchParams={searchParams} />
     </Suspense>
   );
 }
 
-async function Account() {
+async function Account({ searchParams }: { searchParams: Query }) {
   // Read the cookie first: this is what makes the page render per request.
   const token = (await cookies()).get(SESSION_COOKIE)?.value;
-  const secret = sessionSecret();
-  const session = secret ? decodeSession(token, secret) : null;
+  // Checking the session's expiry reads the clock, which needs a real request.
+  await connection();
+  const loaded = await loadAccount(token, sessionSecret());
+  // A cookie from before the database: turn it into an account, then come back.
+  if (loaded.state === "upgrade") redirect("/api/session/upgrade");
 
-  if (!session) {
+  if (loaded.state === "unavailable") {
     return (
-      <>
-        <SiteHeader />
-        <main className="mx-auto flex w-full max-w-[640px] flex-1 flex-col items-start justify-center px-5 py-10 sm:px-8">
-          <div className="wally-float w-36">
-            <Wally priority className="w-full" />
-          </div>
-          <h1 className="mt-4 font-display text-4xl font-bold tracking-[-0.02em]">You’re not signed in.</h1>
-          <p className="mt-3 text-lg text-ink-soft">Sign in to see your account.</p>
-          <Link
-            href="/signin"
-            className="press mt-6 inline-flex h-14 items-center rounded-full bg-green px-8 text-[1.125rem] font-semibold text-white hover:bg-green-deep"
-          >
-            Sign in
-          </Link>
-        </main>
-      </>
+      <Notice title="Your account can’t be loaded right now." detail="Wally’s records didn’t respond. Nothing has been changed.">
+        <a href="/account" className={primary}>
+          Try again
+        </a>
+      </Notice>
     );
   }
+  if (loaded.state === "signed_out") {
+    return (
+      <Notice title="You’re not signed in." detail="Sign in to see your account.">
+        <Link href="/signin" className={primary}>
+          Sign in
+        </Link>
+      </Notice>
+    );
+  }
+
+  const session = loaded.account;
+  const inDatabase = loaded.kept === "database";
+  const eraseFailed = (await searchParams).problem === "erase";
 
   const wallyNumber = process.env.NEXT_PUBLIC_WALLY_NUMBER ?? null;
 
@@ -59,6 +70,11 @@ async function Account() {
       </SiteHeader>
 
       <main className="mx-auto w-full max-w-[640px] flex-1 px-5 pt-6 pb-16 sm:px-8">
+        {eraseFailed && (
+          <p role="alert" className="mb-6 rounded-xl border border-red/40 bg-red/5 p-3 text-[0.95rem] font-medium text-red">
+            Your account wasn’t erased. Wally’s records didn’t respond. Nothing was deleted. Try again in a moment.
+          </p>
+        )}
         <div className="flex items-center gap-4">
           <div className="wally-float w-24 shrink-0 sm:w-28">
             <Wally priority className="w-full" />
@@ -89,19 +105,19 @@ async function Account() {
             icon={<Glyph>📱</Glyph>}
             title="Phone"
             detail={session.phone ? `+1 ${formatUsPhone(session.phone)}` : "Not linked"}
-            action={<Action href="/join" quiet>{session.phone ? "Change" : "Add"}</Action>}
+            action={<Action href="/join?link=1" quiet>{session.phone ? "Change" : "Add"}</Action>}
           />
           <Row
             icon={<Glyph>@</Glyph>}
             title="Email"
             detail={session.email ?? "Not linked"}
-            action={<Action href="/signin" quiet>{session.email ? "Change" : "Add"}</Action>}
+            action={<Action href="/signin?link=1" quiet>{session.email ? "Change" : "Add"}</Action>}
           />
           <Row
             icon={<Glyph>G</Glyph>}
             title="Google"
             detail={session.google ? "Connected" : "Not connected"}
-            action={session.google ? <Done>Connected</Done> : <Action href="/api/auth/google/start" external>Connect</Action>}
+            action={session.google ? <Done>Connected</Done> : <Action href="/api/auth/google/start?link=1" external>Connect</Action>}
           />
         </Section>
 
@@ -118,21 +134,56 @@ async function Account() {
         </Section>
 
         <Section title="Data privacy" subtitle="What Wally keeps about you">
-          <Row
-            title="Your details"
-            detail="For now, everything on this page is stored only in this browser. Signing out erases it."
-            action={
-              <form action="/api/session/logout" method="post">
-                <button
-                  type="submit"
-                  className="press h-11 rounded-xl border border-red/50 px-4 font-semibold text-red hover:bg-red/5"
-                >
-                  Sign out and erase
-                </button>
-              </form>
-            }
-          />
+          {inDatabase ? (
+            // Stacked on phones: two buttons beside the text leave it no room.
+            <div className="py-4 sm:flex sm:items-center sm:gap-4">
+              <div className="min-w-0 flex-1">
+                <p className="font-semibold">Your details</p>
+                <p className="text-[0.95rem] text-ink-soft">
+                  Wally keeps your name and the sign-in methods above, so your account is here on any device you sign in
+                  from. Erasing deletes them for good.
+                </p>
+              </div>
+              <div className="mt-3 sm:mt-0 sm:shrink-0">
+                <EraseButton />
+              </div>
+            </div>
+          ) : (
+            <Row
+              title="Your details"
+              detail="For now, everything on this page is stored only in this browser. Signing out erases it."
+              action={
+                <form action="/api/session/logout" method="post">
+                  <button
+                    type="submit"
+                    className="press h-11 rounded-xl border border-red/50 px-4 font-semibold text-red hover:bg-red/5"
+                  >
+                    Sign out and erase
+                  </button>
+                </form>
+              }
+            />
+          )}
         </Section>
+      </main>
+    </>
+  );
+}
+
+const primary =
+  "press mt-6 inline-flex h-14 items-center rounded-full bg-green px-8 text-[1.125rem] font-semibold text-white hover:bg-green-deep";
+
+function Notice({ title, detail, children }: { title: string; detail: string; children: ReactNode }) {
+  return (
+    <>
+      <SiteHeader />
+      <main className="mx-auto flex w-full max-w-[640px] flex-1 flex-col items-start justify-center px-5 py-10 sm:px-8">
+        <div className="wally-float w-36">
+          <Wally priority className="w-full" />
+        </div>
+        <h1 className="mt-4 font-display text-4xl font-bold tracking-[-0.02em]">{title}</h1>
+        <p className="mt-3 text-lg text-ink-soft">{detail}</p>
+        {children}
       </main>
     </>
   );

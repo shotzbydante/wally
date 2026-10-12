@@ -9,6 +9,7 @@ Read `docs/product-brief.md` before any product or architecture work. It condens
 - `apps/web` — Next.js (App Router, TypeScript, Tailwind v4). Onboarding, Home, Taste, Wallet & Limits, Ledger. See `apps/web/AGENTS.md`: this Next.js version has breaking changes, read the bundled docs before writing Next code.
 - `packages/core` — `@wally/core`. Framework-free domain code: the connector interface (`connector.ts`) and the policy/approval engine (`policy.ts`).
 - `docs/` — product brief and decisions.
+- `supabase/migrations` — the database schema, as SQL. `supabase/migrations.test.ts` runs it in an in-process Postgres (PGlite).
 
 Planned, not yet built: channel gateway (iMessage bridge, SMS), conversation orchestrator, memory service, payments service, human ops console.
 
@@ -51,13 +52,23 @@ These come from the PRD and exist because of real failures at competitors.
 - Tokens live in `apps/web/src/app/globals.css`: cool paper background, vest-navy ink, green accents, all drawn from the character art. One typeface, Figtree, self-hosted via `@fontsource-variable`.
 - Wally renders through `src/components/Wally.tsx`. The page background must stay `--paper`, which matches the image backdrop.
 - Onboarding is `/join` (`src/components/JoinFlow.tsx`): name, mobile and ZIP, text consent, then a 6-digit code. Wally speaks each step in a speech bubble and the form is a plain white card.
-- Verification: `/api/verify/start` and `/api/verify/check` call Twilio Verify (`src/lib/server/verify.ts`). On success a signed, httpOnly session cookie is set (`src/lib/server/session.ts`) and `/account` reads it. There is no database yet, so the cookie carries the sign-up details and the account exists only on that device.
+- Verification: `/api/verify/start` and `/api/verify/check` call Twilio Verify (`src/lib/server/verify.ts`). On success a signed, httpOnly session cookie is set (`src/lib/server/session.ts`) and `/account` reads it.
 - Needs `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_VERIFY_SERVICE_SID` and `SESSION_SECRET`. Without them the API answers 503 and the UI says verification isn't switched on. `WALLY_DEV_VERIFY_CODE` is a local-only stand-in, ignored in Vercel production.
-- Sign-in at `/signin`: Google OAuth (`/api/auth/google/*`) and emailed sign-in links through Resend (`/api/auth/email/*`). All three methods (phone, email, Google) merge into one session via `setSession`. Tokens are typed (`session`, `email-link`) so one can't be used as another. Email links are not single-use until there is a database.
+- Sign-in at `/signin`: Google OAuth (`/api/auth/google/*`) and emailed sign-in links through Resend (`/api/auth/email/*`). Tokens are typed (`session`, `email-link`) so one can't be used as another. Email links work once.
 - `/account` is the settings-style profile: contact, name, sign-in methods, delivery apps, reservations, data privacy. Food services come from `src/lib/connectors.ts` and all show "Coming soon"; none may get a working Connect button until a sanctioned integration exists (rule 8). Use letter tiles, not third-party logos.
 - Needs `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `RESEND_API_KEY`, `EMAIL_FROM`. `WALLY_DEV_EMAIL_LINKS=1` shows the link on screen locally.
 - Motion classes are in `globals.css`. Anything that transforms Wally must also be listed in the `mix-blend-mode: darken` rule, or a box appears around him.
 - Tailwind runs through PostCSS (`postcss.config.mjs`), and the Turbopack build cache is off, after a cached Vercel build shipped stale styles.
+
+## Accounts and the database
+
+- Accounts live in Supabase, used as plain Postgres. Wally keeps its own sign-in; Supabase Auth is not used. Needs `SUPABASE_URL` and `SUPABASE_SECRET_KEY` (`SUPABASE_SERVICE_ROLE_KEY` also works).
+- The server reaches the database only through the SQL functions in `supabase/migrations` (`wally_sign_in`, `wally_account`, `wally_set_name`, `wally_delete_account`, `wally_use_link`), called over the project's REST endpoint by `src/lib/server/db.ts`. `src/lib/server/accounts.ts` is the only caller. The secret key must never reach the browser.
+- Tables have row level security on with no policies, and the functions are granted to `service_role` only, so the publishable key can do nothing. Keep that for every new table and function, and add a test for it.
+- Schema changes are new files in `supabase/migrations`, applied by hand in the Supabase SQL editor. Never edit a migration that has been applied.
+- The session cookie holds only the account id. A sign-in is plain by default: it returns the account that owns the email or phone and ignores whoever was signed in before. Only the account page's Add/Change/Connect links (`?link=1`) attach an email, phone or Google to the signed-in account, and that can fold another account into it. When tables start referencing accounts, `wally_sign_in` has to move those rows in the fold.
+- Without the two variables the app falls back to keeping the profile in the cookie (one browser). A cookie from that mode is turned into an account by `/api/session/upgrade`.
+- If the database doesn't answer, sign-in and saves fail with a plain message and change nothing.
 
 ## Conventions
 
