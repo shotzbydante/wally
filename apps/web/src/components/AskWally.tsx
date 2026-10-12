@@ -202,7 +202,7 @@ export function AskWally({ name, initial, ready }: { name: string; initial: Chat
   const line = !ready
     ? "My line to the kitchen isn’t connected yet."
     : pending?.searching
-      ? "Let me see what’s out there."
+      ? "One moment. I’m on it."
       : mood === "thinking"
         ? "One moment. Let me think."
       : mood === "sorry"
@@ -314,12 +314,12 @@ export function AskWally({ name, initial, ready }: { name: string; initial: Chat
               {(!pending.answer || pending.searching) && (
                 <div
                   className="say flex w-fit items-center gap-1.5 rounded-[1.35rem] rounded-bl-md bg-pad px-4 py-4 ring-1 ring-line ring-inset"
-                  aria-label={pending.searching ? "Wally is searching the web" : "Wally is thinking"}
+                  aria-label={pending.searching ? "Wally is looking something up" : "Wally is thinking"}
                 >
                   {[0, 150, 300].map((d) => (
                     <span key={d} className="dot size-2 rounded-full bg-green" style={{ "--d": `${d}ms` } as CSSProperties} />
                   ))}
-                  {pending.searching && <span className="ml-2 text-[0.95rem] leading-none text-ink-soft">Searching the web</span>}
+                  {pending.searching && <LookingUp />}
                 </div>
               )}
             </>
@@ -371,6 +371,22 @@ export function AskWally({ name, initial, ready }: { name: string; initial: Chat
         </p>
       </section>
     </main>
+  );
+}
+
+/** What Wally says he's up to while he looks something up. */
+const lookingUp = ["Checking my notepad", "Asking around the kitchen", "Cooking up a good answer"];
+
+function LookingUp() {
+  const [step, setStep] = useState(0);
+  useEffect(() => {
+    const timer = setInterval(() => setStep((n) => (n + 1) % lookingUp.length), 2400);
+    return () => clearInterval(timer);
+  }, []);
+  return (
+    <span key={step} className="say ml-2 text-[0.95rem] leading-none text-ink-soft">
+      {lookingUp[step]}
+    </span>
   );
 }
 
