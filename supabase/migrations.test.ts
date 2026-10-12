@@ -39,7 +39,7 @@ beforeAll(async () => {
 }, 30_000);
 
 beforeEach(async () => {
-  await db.exec("reset role; truncate public.accounts, public.used_sign_in_links; set role service_role;");
+  await db.exec("reset role; truncate public.accounts, public.used_sign_in_links cascade; set role service_role;");
 });
 
 interface SignIn {
@@ -153,6 +153,101 @@ describe("account functions", () => {
   });
 });
 
+interface Message {
+  id: number;
+  role: "user" | "assistant";
+  channel: "web" | "text";
+  content: string;
+  choices: unknown[] | null;
+}
+type Begin = { status: "ok"; id: number; messages: Message[] } | { status: "limited" } | { status: "gone" };
+
+describe("conversation", () => {
+  const one = async <T>(sql: string, params: unknown[]) => (await db.query<{ v: T }>(sql, params)).rows[0]!.v;
+  const begin = (account: string, content: string, channel = "web", limit = 100, history = 40) =>
+    one<Begin>("select public.wally_chat_begin($1, $2, $3, $4, $5) as v", [account, channel, content, limit, history]);
+  const reply = (account: string, content: string, choices: unknown[] | null = null, channel = "web") =>
+    one<Message | null>("select public.wally_chat_reply($1, $2, $3, $4) as v", [account, channel, content, choices && JSON.stringify(choices)]);
+  const thread = (account: string, limit = 40) => one<Message[]>("select public.wally_messages($1, $2) as v", [account, limit]);
+
+  it("keeps one thread per account, in order, across web and text", async () => {
+    const a = await signIn({ email: "a@example.com" });
+    const b = await signIn({ email: "b@example.com" });
+    const first = await begin(a.id, "What should I eat?");
+    expect(first).toMatchObject({ status: "ok", messages: [{ role: "user", content: "What should I eat?", channel: "web" }] });
+    const choices = [{ emoji: "🍜", title: "Ramen", detail: "Rich and warm", reply: "Ramen" }];
+    expect(await reply(a.id, "Two ideas.", choices)).toMatchObject({ role: "assistant", content: "Two ideas.", choices });
+    await begin(a.id, "Ramen", "text");
+    await begin(b.id, "Hello");
+    expect((await thread(a.id)).map((m) => [m.role, m.channel, m.content])).toEqual([
+      ["user", "web", "What should I eat?"],
+      ["assistant", "web", "Two ideas."],
+      ["user", "text", "Ramen"],
+    ]);
+    expect(await thread(b.id)).toHaveLength(1);
+    expect(JSON.stringify(await thread(a.id))).not.toContain("account_id");
+  });
+
+  it("hands Wally only the most recent messages", async () => {
+    const a = await signIn({ email: "a@example.com" });
+    for (const text of ["one", "two", "three"]) await begin(a.id, text);
+    const last = await begin(a.id, "four", "web", 100, 2);
+    expect(last.status === "ok" && last.messages.map((m) => m.content)).toEqual(["three", "four"]);
+  });
+
+  it("stops at the daily limit without storing the message", async () => {
+    const a = await signIn({ email: "a@example.com" });
+    await begin(a.id, "one", "web", 2);
+    await reply(a.id, "Certainly.");
+    await begin(a.id, "two", "web", 2);
+    expect(await begin(a.id, "three", "web", 2)).toEqual({ status: "limited" });
+    expect(await thread(a.id)).toHaveLength(3);
+  });
+
+  it("takes back a message Wally could not answer, and only the person's own", async () => {
+    const a = await signIn({ email: "a@example.com" });
+    const b = await signIn({ email: "b@example.com" });
+    const sent = await begin(a.id, "hello");
+    const answer = await reply(a.id, "Good evening.");
+    if (sent.status !== "ok") throw new Error("expected ok");
+    await db.query("select public.wally_chat_undo($1, $2)", [b.id, sent.id]);
+    await db.query("select public.wally_chat_undo($1, $2)", [a.id, answer!.id]);
+    expect(await thread(a.id)).toHaveLength(2);
+    await db.query("select public.wally_chat_undo($1, $2)", [a.id, sent.id]);
+    expect((await thread(a.id)).map((m) => m.content)).toEqual(["Good evening."]);
+  });
+
+  it("refuses an empty message, and one for an erased account", async () => {
+    const a = await signIn({ email: "a@example.com" });
+    await expect(begin(a.id, "")).rejects.toThrow(/messages_not_empty/);
+    await db.query("select public.wally_delete_account($1)", [a.id]);
+    expect(await begin(a.id, "hello")).toEqual({ status: "gone" });
+    expect(await reply(a.id, "hello")).toBeNull();
+  });
+
+  it("clears a thread, and erasing the account erases it too", async () => {
+    const a = await signIn({ email: "a@example.com" });
+    const b = await signIn({ email: "b@example.com" });
+    await begin(a.id, "one");
+    await begin(a.id, "two");
+    await begin(b.id, "three");
+    expect(await one<number>("select public.wally_clear_messages($1) as v", [a.id])).toBe(2);
+    expect(await thread(a.id)).toEqual([]);
+    await db.query("select public.wally_delete_account($1)", [b.id]);
+    await db.exec("reset role");
+    expect(await one<number>("select count(*)::int as v from public.messages", [])).toBe(0);
+  });
+
+  it("carries the conversation across when one account is folded into another", async () => {
+    const byPhone = await signIn({ phone: "3105550142", name: "Ana", typed: true });
+    const byEmail = await signIn({ email: "a@example.com" });
+    await begin(byPhone.id, "by text", "text");
+    await begin(byEmail.id, "on the web");
+    await signIn({ link: byEmail.id, phone: "3105550142" });
+    expect((await thread(byEmail.id)).map((m) => m.content)).toEqual(["by text", "on the web"]);
+  });
+});
+
 describe("access", () => {
   it.each(["anon", "authenticated"])("is closed to the %s role, which the publishable key maps to", async (role) => {
     await db.exec("reset role");
@@ -160,6 +255,10 @@ describe("access", () => {
     await db.exec(`set role ${role}`);
     await expect(db.query("select * from public.accounts")).rejects.toThrow(/permission denied/);
     await expect(db.query("select * from public.wally_account(gen_random_uuid())")).rejects.toThrow(/permission denied/);
+    await expect(db.query("select * from public.messages")).rejects.toThrow(/permission denied/);
+    await expect(db.query("select public.wally_messages(gen_random_uuid(), 10)")).rejects.toThrow(/permission denied/);
+    await expect(db.query("select public.wally_chat_begin(gen_random_uuid(), 'web', 'hi', 100, 40)")).rejects.toThrow(/permission denied/);
+    await expect(db.query("select public.wally_clear_messages(gen_random_uuid())")).rejects.toThrow(/permission denied/);
     await expect(
       db.query("select * from public.wally_sign_in(null, 'x@example.com', false, null, null, null, null, false)"),
     ).rejects.toThrow(/permission denied/);

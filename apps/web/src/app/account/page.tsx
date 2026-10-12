@@ -6,7 +6,8 @@ import { connection } from "next/server";
 import { Suspense, type ReactNode } from "react";
 import { EraseButton } from "@/components/EraseButton";
 import { NameForm } from "@/components/NameForm";
-import { SiteHeader } from "@/components/SiteHeader";
+import { Notice, noticeAction as primary } from "@/components/Notice";
+import { SignedInHeader } from "@/components/SignedInHeader";
 import { Wally } from "@/components/Wally";
 import { delivery, reservations, type FoodService } from "@/lib/connectors";
 import { loadAccount } from "@/lib/server/accounts";
@@ -61,13 +62,7 @@ async function Account({ searchParams }: { searchParams: Query }) {
 
   return (
     <>
-      <SiteHeader>
-        <form action="/api/session/logout" method="post">
-          <button type="submit" className="text-green underline-offset-4 hover:underline">
-            Sign out
-          </button>
-        </form>
-      </SiteHeader>
+      <SignedInHeader active="/account" />
 
       <main className="mx-auto w-full max-w-[640px] flex-1 px-5 pt-6 pb-16 sm:px-8">
         {eraseFailed && (
@@ -121,6 +116,20 @@ async function Account({ searchParams }: { searchParams: Query }) {
           />
         </Section>
 
+        <Section title="This browser" subtitle="Signing out keeps your account and your conversation">
+          <Row
+            title="Signed in"
+            detail={session.email ?? (session.phone ? `+1 ${formatUsPhone(session.phone)}` : "This browser")}
+            action={
+              <form action="/api/session/logout" method="post">
+                <button type="submit" className="press h-11 rounded-xl bg-pad px-4 font-semibold ring-1 ring-line ring-inset hover:ring-ink">
+                  Sign out
+                </button>
+              </form>
+            }
+          />
+        </Section>
+
         <Section title="Delivery apps" subtitle="Where Wally can order from for you">
           {delivery.map((s) => (
             <ServiceRow key={s.name} service={s} />
@@ -140,8 +149,8 @@ async function Account({ searchParams }: { searchParams: Query }) {
               <div className="min-w-0 flex-1">
                 <p className="font-semibold">Your details</p>
                 <p className="text-[0.95rem] text-ink-soft">
-                  Wally keeps your name and the sign-in methods above, so your account is here on any device you sign in
-                  from. Erasing deletes them for good.
+                  Wally keeps your name, the sign-in methods above and your conversation with him, so they are here on
+                  any device you sign in from. Erasing deletes all of it for good.
                 </p>
               </div>
               <div className="mt-3 sm:mt-0 sm:shrink-0">
@@ -165,25 +174,6 @@ async function Account({ searchParams }: { searchParams: Query }) {
             />
           )}
         </Section>
-      </main>
-    </>
-  );
-}
-
-const primary =
-  "press mt-6 inline-flex h-14 items-center rounded-full bg-green px-8 text-[1.125rem] font-semibold text-white hover:bg-green-deep";
-
-function Notice({ title, detail, children }: { title: string; detail: string; children: ReactNode }) {
-  return (
-    <>
-      <SiteHeader />
-      <main className="mx-auto flex w-full max-w-[640px] flex-1 flex-col items-start justify-center px-5 py-10 sm:px-8">
-        <div className="wally-float w-36">
-          <Wally priority className="w-full" />
-        </div>
-        <h1 className="mt-4 font-display text-4xl font-bold tracking-[-0.02em]">{title}</h1>
-        <p className="mt-3 text-lg text-ink-soft">{detail}</p>
-        {children}
       </main>
     </>
   );

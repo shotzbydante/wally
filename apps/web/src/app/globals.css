@@ -54,7 +54,7 @@ body {
    "darken" makes the edge of the image disappear. */
 /* Every animated wrapper around him needs it too: a transform starts a
    new stacking group, and the blend has to carry through each one. */
-.wally-img, .wally-float, .wally-hop, .wally-enter {
+.wally-img, .wally-float, .wally-hop, .wally-enter, .wally-think {
   mix-blend-mode: darken;
 }
 .wally-img {
@@ -133,6 +133,34 @@ body {
 /* Buttons give a little under the finger. */
 .press { transition: transform 120ms ease, background-color 160ms ease; }
 .press:active { transform: scale(0.97); }
+
+/* ---------- Ask Wally ---------- */
+
+/* Wally rocks on his heels while he works out an answer. */
+@keyframes wally-think {
+  0%, 100% { transform: translateY(0) rotate(-2.2deg); }
+  50% { transform: translateY(-4px) rotate(2.2deg); }
+}
+.wally-think { animation: wally-think 1.1s ease-in-out infinite; transform-origin: 50% 92%; }
+
+/* The person's own message leaves from the right. */
+.sent-mine { animation: sent 320ms cubic-bezier(0.2, 0.8, 0.2, 1) both; transform-origin: 100% 100%; }
+
+/* A pen nib at the end of the line while Wally is still writing. */
+@keyframes caret { 50% { opacity: 0; } }
+.caret {
+  display: inline-block;
+  width: 2px;
+  height: 1.05em;
+  margin-left: 2px;
+  vertical-align: -0.15em;
+  background: var(--green);
+  animation: caret 900ms steps(1) infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wally-think, .sent-mine, .caret { animation: none; }
+}
 
 @media (prefers-reduced-motion: reduce) {
   .wally-float, .arrive, .wally-enter, .sent, .step-in, .dot, .tick, .tick path { animation: none; }

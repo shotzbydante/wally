@@ -11,7 +11,7 @@ Read `docs/product-brief.md` before any product or architecture work. It condens
 - `docs/` — product brief and decisions.
 - `supabase/migrations` — the database schema, as SQL. `supabase/migrations.test.ts` runs it in an in-process Postgres (PGlite).
 
-Planned, not yet built: channel gateway (iMessage bridge, SMS), conversation orchestrator, memory service, payments service, human ops console.
+Planned, not yet built: channel gateway (iMessage bridge, SMS), memory service, payments service, human ops console. The conversation orchestrator exists in its first form: see "Ask Wally and the agent".
 
 ## Commands
 
@@ -63,12 +63,23 @@ These come from the PRD and exist because of real failures at competitors.
 ## Accounts and the database
 
 - Accounts live in Supabase, used as plain Postgres. Wally keeps its own sign-in; Supabase Auth is not used. Needs `SUPABASE_URL` and `SUPABASE_SECRET_KEY` (`SUPABASE_SERVICE_ROLE_KEY` also works).
-- The server reaches the database only through the SQL functions in `supabase/migrations` (`wally_sign_in`, `wally_account`, `wally_set_name`, `wally_delete_account`, `wally_use_link`), called over the project's REST endpoint by `src/lib/server/db.ts`. `src/lib/server/accounts.ts` is the only caller. The secret key must never reach the browser.
+- The server reaches the database only through the SQL functions in `supabase/migrations` (`wally_sign_in`, `wally_account`, `wally_set_name`, `wally_delete_account`, `wally_use_link`), called over the project's REST endpoint by `src/lib/server/db.ts`. `src/lib/server/accounts.ts` and `src/lib/server/conversation.ts` are the only callers. The secret key must never reach the browser.
 - Tables have row level security on with no policies, and the functions are granted to `service_role` only, so the publishable key can do nothing. Keep that for every new table and function, and add a test for it.
 - Schema changes are new files in `supabase/migrations`, applied by hand in the Supabase SQL editor. Never edit a migration that has been applied.
 - The session cookie holds only the account id. A sign-in is plain by default: it returns the account that owns the email or phone and ignores whoever was signed in before. Only the account page's Add/Change/Connect links (`?link=1`) attach an email, phone or Google to the signed-in account, and that can fold another account into it. When tables start referencing accounts, `wally_sign_in` has to move those rows in the fold.
 - Without the two variables the app falls back to keeping the profile in the cookie (one browser). A cookie from that mode is turned into an account by `/api/session/upgrade`.
 - If the database doesn't answer, sign-in and saves fail with a plain message and change nothing.
+
+## Ask Wally and the agent
+
+- `/ask` is the signed-in chat (`src/components/AskWally.tsx`). Signed-in pages share `SignedInHeader`, with the Ask Wally and Account tabs.
+- The agent is Claude, called from `src/lib/server/agent.ts`. `reply(thread, guest, channel, onText)` knows nothing about HTTP or the page: the texting agent must call the same function so both channels get the same Wally. The system prompt lives there and encodes the rules above. Wally has no connectors yet, so the prompt forbids claiming to order, book or look anything up; relax that only as real connectors arrive.
+- Needs `ANTHROPIC_API_KEY`. `WALLY_MODEL` picks the model (default `claude-sonnet-5-5`). Check `node_modules/@anthropic-ai/sdk` types and https://platform.claude.com/docs before changing API parameters.
+- There is one conversation per account, in `public.messages`, whatever the channel (`web` or `text`). That shared thread is what keeps the website and texting in step. The page re-reads it whenever the tab regains focus.
+- `/api/chat`: GET the thread, POST a message (the answer streams back as one JSON event per line), DELETE to erase it. A turn is `wally_chat_begin` (stores the message, enforces `WALLY_DAILY_MESSAGES`, returns recent history), then Claude, then `wally_chat_reply`. If Claude fails, the message is taken back out with `wally_chat_undo` and the page hands the words back to resend.
+- Options are structured, not prose: Claude calls the `show_choices` tool, the choices are stored as JSON beside the message, shown as cards on the web, and flattened to a numbered list (`asPlainText`) for text threads and for Claude's own history.
+- Messages are plain text, no markdown, so the same words work in a text message.
+- Open item: rule 9. People may mention allergies in conversation, and those messages are stored with the rest of the thread. A separately consented store is still to build before Wally remembers dietary needs.
 
 ## Conventions
 
