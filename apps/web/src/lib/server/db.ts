@@ -10,7 +10,8 @@ export interface DbConfig {
 }
 
 export function dbConfig(): DbConfig | null {
-  const url = process.env.SUPABASE_URL?.trim().replace(/\/+$/, "");
+  // Supabase's dashboard shows the URL with /rest/v1 on the end; accept either form.
+  const url = process.env.SUPABASE_URL?.trim().replace(/\/+$/, "").replace(/\/rest\/v1$/, "");
   // The Vercel integration names the key SUPABASE_SERVICE_ROLE_KEY.
   const key = (process.env.SUPABASE_SECRET_KEY ?? process.env.SUPABASE_SERVICE_ROLE_KEY)?.trim();
   return url && key ? { url, key } : null;
