@@ -137,10 +137,11 @@ describe("asTexts", () => {
   it("sends his words and the cards as separate texts, a small card per place", () => {
     expect(asTexts({ content: "Insomnia is my pick.", choices: [cookies, closed] }, "https://wallywaiter.com")).toEqual([
       "Insomnia is my pick.",
-      "1. 🍪 Insomnia Cookies\nOpen now · 2.8 mi · ★ 4.5 · $\nOpen late, warm cookies\ninsomniacookies.com\n\n2. 🥛 DeLuscious\nClosed · 1.1 mi\nDoorDash: wallywaiter.com/go/doordash/deluscious\nUber Eats: wallywaiter.com/go/ubereats/deluscious",
+      "1. 🍪 Insomnia Cookies\nOpen now · 2.8 mi · ★ 4.5 · $\nOpen late, warm cookies\ninsomniacookies.com\n\n2. 🥛 DeLuscious\nClosed · 1.1 mi\nDoorDash: wallywaiter.com/go/doordash/deluscious\nUber Eats: wallywaiter.com/go/ubereats/deluscious\n\nVisit Wally for more options: wallywaiter.com/ask",
     ]);
     expect(asTexts({ content: "Just words.", choices: null }, "https://wallywaiter.com")).toEqual(["Just words."]);
-    expect(asTexts({ content: "Two ideas.", choices: [ramen, tacos] }, "https://wallywaiter.com")).toEqual(["Two ideas.", "1. 🍜 Ramen\nRich and warm\n\n2. 🌮 Tacos"]);
+    expect(asTexts({ content: "Two ideas.", choices: [ramen, tacos] }, "https://wallywaiter.com")).toEqual(["Two ideas.", "1. 🍜 Ramen\nRich and warm\n\n2. 🌮 Tacos\n\nVisit Wally for more options: wallywaiter.com/ask"]);
+    expect(asTexts({ content: "", choices: [ramen, tacos] }, "https://wallywaiter.com", true)[0]).toMatch(/wallywaiter\.com\/ask\nIt's this same conversation, always in sync with our texts\.$/);
   });
   it("writes delivery links a text can carry", () => {
     expect(textDeliveryLinks("Lei’d Cookies & Café", "https://wallywaiter.com").map((l) => l.url)).toEqual(["wallywaiter.com/go/doordash/leid-cookies-cafe", "wallywaiter.com/go/ubereats/leid-cookies-cafe"]);

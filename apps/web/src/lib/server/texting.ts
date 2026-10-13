@@ -189,7 +189,7 @@ function showTyping(provider: Provider, to: string): void {
 const NOTICE = {
   unknown: (origin: string) => `Hi, I'm Wally, an AI waiter. I don't know this number yet. Sign in at ${origin}/account and tap Connect by text, or sign up at ${origin}/join.`,
   hello: "Wally here, your AI waiter. Save my contact card so you know it's me. Reply STOP to stop texts, HELP for help.",
-  // Closes his first answer, and comes back only after a quiet week (webNudgeDue).
+  // Closes his first answer when it has no options, and comes back only after a quiet week (webNudgeDue).
   web: (origin: string) => `P.S. This same conversation lives at ${tidyLink(`${origin}/ask`)}, with tappable cards for every place. Text me or pick it up there: the two stay in sync.`,
   stopped: "You won't get any more texts from Wally. Reply START to turn them back on.",
   started: "Texts from Wally are back on. What can I get you?",
@@ -261,8 +261,10 @@ export async function handleInbound(inbound: Inbound, origin: string): Promise<v
       const answer = await reply(begun.messages, { name: account.name, zip: account.zip, near: account.near, address: account.address }, "text", { onText: () => {} });
       const saved = await saveReply(account.id, "text", answer.content, answer.choices);
       if (saved) {
-        // One bubble for his words, one for the cards, and now and then a pointer to the website.
-        const texts = [...asTexts(answer, origin), ...(begun.first || webNudgeDue(begun.messages) ? [NOTICE.web(origin)] : [])];
+        // Options always end with a link to the website. That it is the same conversation is said
+        // on his first answer and after a quiet week: under the options, or as a P.S. to plain words.
+        const nudge = begun.first || webNudgeDue(begun.messages);
+        const texts = [...asTexts(answer, origin, nudge), ...(nudge && !answer.choices?.length ? [NOTICE.web(origin)] : [])];
         for (const part of texts) if (!(await sendText(provider, from, part))) break;
       }
     } catch (error) {

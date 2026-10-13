@@ -97,9 +97,10 @@ export function tidyLink(url: string): string {
  *
  * A place's link is its website. Without one, the card offers the delivery
  * apps instead, as short links on `origin` (see `textDeliveryLinks`). A
- * Google Maps link is never sent.
+ * Google Maps link is never sent. The options end with a link to `/ask`,
+ * where the same conversation is waiting; `sayInSync` adds a line saying so.
  */
-export function asTexts(message: Pick<ChatMessage, "content" | "choices">, origin: string): string[] {
+export function asTexts(message: Pick<ChatMessage, "content" | "choices">, origin: string, sayInSync = false): string[] {
   const cards = (message.choices ?? []).map((c, i) => {
     const p = c.place;
     const facts = [
@@ -113,7 +114,9 @@ export function asTexts(message: Pick<ChatMessage, "content" | "choices">, origi
     const links = site ? [tidyLink(site)] : p ? textDeliveryLinks(c.title, origin).map((l) => `${l.app}: ${l.url}`) : [];
     return [`${i + 1}. ${c.emoji ? `${c.emoji} ` : ""}${c.title}`, facts.join(" · "), c.detail, ...links].filter(Boolean).join("\n");
   });
-  return [message.content.trim(), cards.join("\n\n")].filter(Boolean);
+  // Every set of options closes with the way into the same conversation on the website.
+  const more = `Visit Wally for more options: ${tidyLink(`${origin}/ask`)}${sayInSync ? "\nIt's this same conversation, always in sync with our texts." : ""}`;
+  return [message.content.trim(), cards.length ? `${cards.join("\n\n")}\n\n${more}` : ""].filter(Boolean);
 }
 
 /** How long texting must have been quiet before Wally mentions the website again. */
