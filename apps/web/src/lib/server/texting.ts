@@ -54,7 +54,7 @@ export function sendblueTexting(): SendblueConfig | null {
 }
 
 // SENDBLUE_API_BASE points tests at a stand-in server.
-const sendblueBase = () => env("SENDBLUE_API_BASE")?.replace(/\/+$/, "") ?? "https://api.sendblue.co";
+const sendblueBase = () => env("SENDBLUE_API_BASE")?.replace(/\/+$/, "") ?? "https://api.sendblue.com";
 
 /** "+1 (310) 555-0142" to "3105550142". Null for anything that isn't a US number. */
 export function usPhone(raw: unknown): string | null {
