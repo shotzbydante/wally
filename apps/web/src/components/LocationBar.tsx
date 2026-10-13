@@ -27,7 +27,7 @@ function Pin({ className }: { className: string }) {
 /**
  * The address Wally searches near. It stays pinned to the top of the page
  * while the conversation scrolls, so it can be changed at any point.
- * AskWally's sticky offsets assume this bar is 4.5rem tall.
+ * AskWally's sticky offsets assume this bar is 3.5rem tall.
  */
 export function LocationBar({ saved, onChange }: { saved: string | null; onChange: (address: string | null) => void }) {
   const [editing, setEditing] = useState(false);
@@ -63,19 +63,19 @@ export function LocationBar({ saved, onChange }: { saved: string | null; onChang
     void request("POST", draft);
   };
 
-  const quiet = "press h-9 shrink-0 rounded-full px-3 text-[0.9rem] font-semibold text-ink-soft hover:text-ink disabled:opacity-50";
+  const quiet = "press h-8 shrink-0 rounded-full px-3 text-[0.9rem] font-semibold text-ink-soft hover:text-ink disabled:opacity-50";
 
   return (
-    <div className="sticky top-0 z-20 bg-paper/90 backdrop-blur">
-      <div className="mx-auto w-full max-w-[1080px] px-5 py-3 sm:px-8">
+    <div className="sticky top-0 z-20 bg-paper/95 backdrop-blur">
+      <div className="mx-auto w-full max-w-[1080px] px-5 py-2 sm:px-8">
         {/* With no address yet the bar is tinted and outlined, so it reads as the next thing to do. */}
         <div
-          className={`flex h-12 items-center gap-2.5 rounded-full py-1 pr-1.5 pl-1.5 ring-inset ${
-            saved && !editing ? "bg-pad ring-1 ring-line" : "bg-mint-wash ring-2 ring-green"
+          className={`flex h-10 items-center gap-2 rounded-full py-1 pr-1 pl-1 text-[0.95rem] ring-inset ${
+            saved && !editing ? "bg-pad shadow-[0_6px_18px_-14px_rgba(22,26,43,0.45)] ring-1 ring-line" : "bg-mint-wash ring-2 ring-green"
           }`}
         >
-          <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-green text-white">
-            <Pin className="size-5" />
+          <span className="flex size-8 shrink-0 items-center justify-center rounded-full fill-green text-white">
+            <Pin className="size-[1.1rem]" />
           </span>
           {!asking ? (
             <>
@@ -85,7 +85,7 @@ export function LocationBar({ saved, onChange }: { saved: string | null; onChang
               </p>
               <button
                 type="button"
-                className="press h-9 shrink-0 rounded-full bg-paper px-4 text-[0.9rem] font-semibold ring-1 ring-line ring-inset hover:ring-ink"
+                className="press h-8 shrink-0 rounded-full bg-paper px-3.5 text-[0.85rem] font-semibold ring-1 ring-line ring-inset hover:ring-ink"
                 onClick={() => {
                   setDraft(tidy(saved));
                   setError(null);
@@ -109,7 +109,7 @@ export function LocationBar({ saved, onChange }: { saved: string | null; onChang
                 maxLength={200}
                 aria-label="Your address"
                 placeholder="Your address, so Wally can find what’s close"
-                className="h-9 min-w-0 flex-1 bg-transparent px-1 outline-none! placeholder:text-ink-soft sm:px-2"
+                className="h-8 min-w-0 flex-1 bg-transparent px-1 outline-none! placeholder:text-ink-soft sm:px-2"
               />
               {saved && (
                 <>
@@ -121,7 +121,7 @@ export function LocationBar({ saved, onChange }: { saved: string | null; onChang
                   </button>
                 </>
               )}
-              <button type="submit" disabled={busy || !draft.trim()} className="press h-9 shrink-0 rounded-full bg-green px-4 text-[0.9rem] font-semibold text-white hover:bg-green-deep disabled:opacity-60">
+              <button type="submit" disabled={busy || !draft.trim()} className="press fill-green h-8 shrink-0 rounded-full px-4 text-[0.85rem] font-semibold text-white disabled:opacity-60">
                 {busy ? "Saving…" : "Save"}
               </button>
             </form>

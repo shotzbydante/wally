@@ -167,3 +167,146 @@ body {
   .tick path { stroke-dashoffset: 0; }
   .press:active { transform: none; }
 }
+
+/* ---------- Gradients and glow ---------- */
+
+/* Green surfaces carry a slow sweep from Wally's skin toward teal. White text stays above 4.5:1 across it. */
+.fill-green {
+  background-image: linear-gradient(135deg, #0f8259 0%, var(--green) 45%, #0b6a66 100%);
+  box-shadow: 0 8px 18px -12px rgba(14, 124, 87, 0.8), inset 0 1px 0 rgba(255, 255, 255, 0.18);
+}
+.fill-green:disabled {
+  background-image: none;
+  box-shadow: none;
+}
+/* His vest, with a little of his green in the weave. */
+.fill-ink {
+  background-image: linear-gradient(120deg, var(--ink) 0%, #1c2740 55%, #17463f 100%);
+}
+/* Emoji tiles: mint running to butter. */
+.tile {
+  background-image: linear-gradient(140deg, #d3f3e3 0%, #e9f8ee 55%, #fbf1cd 100%);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.7);
+}
+/* A card lifts off the page a touch. */
+.card {
+  background-image: linear-gradient(180deg, #ffffff 0%, #fbfdfc 100%);
+  box-shadow: 0 10px 24px -20px rgba(14, 94, 66, 0.55), 0 1px 2px rgba(22, 26, 43, 0.04);
+}
+/* The restaurant's own site, the one link that glows. */
+.chip-lead {
+  background-image: linear-gradient(120deg, #c9f0dc, #e4f7d9);
+}
+
+/* The message box: a gradient edge that lights up when it has the cursor. */
+.composer {
+  border: 2px solid transparent;
+  background:
+    linear-gradient(var(--pad), var(--pad)) padding-box,
+    linear-gradient(115deg, var(--mint) 0%, var(--green) 40%, #4aa8c0 72%, var(--butter) 100%) border-box;
+  box-shadow: 0 18px 40px -24px rgba(22, 26, 43, 0.4);
+  transition: box-shadow 220ms ease;
+}
+.composer:focus-within {
+  box-shadow: 0 0 0 4px rgba(60, 194, 143, 0.2), 0 18px 44px -20px rgba(14, 124, 87, 0.55);
+}
+/* The dock under the conversation fades in from the page, with a breath of mint at the foot. */
+.dock {
+  background-image: linear-gradient(180deg, rgba(244, 246, 250, 0) 0%, rgba(244, 246, 250, 0.94) 14%, #eef6f3 100%);
+}
+/* Sticky strips let the conversation fade out beneath them instead of cutting it off. */
+.fade-under::after {
+  content: "";
+  position: absolute;
+  inset: 100% 0 auto 0;
+  height: 14px;
+  background: linear-gradient(180deg, rgba(244, 246, 250, 0.9), rgba(244, 246, 250, 0));
+  pointer-events: none;
+}
+
+/* ---------- Wally's face ---------- */
+
+/* The ring around his face. It turns while he works on an answer. */
+.aura {
+  position: relative;
+  border-radius: 9999px;
+  padding: 2px;
+  isolation: isolate;
+}
+.aura::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  background: conic-gradient(from 210deg, var(--mint), var(--butter), #4aa8c0, var(--green), var(--mint));
+}
+.aura::after {
+  content: "";
+  position: absolute;
+  inset: -4px;
+  z-index: -2;
+  border-radius: inherit;
+  background: conic-gradient(from 210deg, var(--mint), var(--butter), #4aa8c0, var(--green), var(--mint));
+  filter: blur(7px);
+  opacity: 0.35;
+  transition: opacity 300ms ease;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+.aura-busy::before, .aura-busy::after { animation: spin 1.6s linear infinite; }
+.aura-busy::after { opacity: 0.75; }
+
+@keyframes face-blink {
+  0%, 94%, 100% { transform: scaleY(1); }
+  96.5% { transform: scaleY(0.08); }
+}
+.face-blink { transform-box: fill-box; transform-origin: center; animation: face-blink 4.6s infinite; }
+@keyframes face-talk {
+  0%, 100% { transform: scaleY(1); }
+  50% { transform: scaleY(0.55); }
+}
+.face-talk { transform-box: fill-box; transform-origin: 50% 0; animation: face-talk 380ms ease-in-out infinite; }
+@keyframes face-nod {
+  0%, 100% { transform: rotate(-5deg); }
+  50% { transform: rotate(5deg); }
+}
+.face-nod { animation: face-nod 1.3s ease-in-out infinite; }
+@keyframes face-pop {
+  0% { transform: scale(1); }
+  40% { transform: scale(1.16) rotate(-6deg); }
+  100% { transform: scale(1); }
+}
+.face-pop { animation: face-pop 520ms cubic-bezier(0.3, 0.7, 0.3, 1); }
+
+/* A couple of sparks when an answer lands. */
+@keyframes spark {
+  0% { opacity: 0; transform: scale(0.2) rotate(0); }
+  35% { opacity: 1; transform: scale(1) rotate(40deg); }
+  100% { opacity: 0; transform: scale(0.4) rotate(90deg) translateY(-6px); }
+}
+.spark {
+  position: absolute;
+  color: var(--butter);
+  font-size: 0.7rem;
+  line-height: 1;
+  opacity: 0;
+  animation: spark 900ms ease-out both;
+  animation-delay: var(--d, 0ms);
+  pointer-events: none;
+}
+
+/* Words that shimmer while he looks something up. */
+@keyframes shimmer { to { background-position: -200% 0; } }
+.shimmer {
+  background: linear-gradient(90deg, var(--ink-soft) 0%, var(--ink-soft) 35%, var(--mint) 50%, var(--ink-soft) 65%, var(--ink-soft) 100%);
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: shimmer 2.2s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .aura-busy::before, .aura-busy::after, .face-blink, .face-talk, .face-nod, .face-pop, .spark { animation: none; }
+  .shimmer { animation: none; background: none; color: var(--ink-soft); }
+}
