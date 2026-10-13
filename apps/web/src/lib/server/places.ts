@@ -9,7 +9,8 @@
 export const placesConfigured = () => Boolean(process.env.GOOGLE_MAPS_API_KEY?.trim());
 
 // GOOGLE_PLACES_API_BASE points tests at a stand-in server.
-const endpoint = () => `${process.env.GOOGLE_PLACES_API_BASE?.trim().replace(/\/+$/, "") || "https://places.googleapis.com"}/v1/places:searchText`;
+const base = () => process.env.GOOGLE_PLACES_API_BASE?.trim().replace(/\/+$/, "") || "https://places.googleapis.com";
+const endpoint = () => `${base()}/v1/places:searchText`;
 
 export class PlacesError extends Error {}
 
@@ -27,6 +28,8 @@ export interface Place {
   address: string;
   /** What kind of place, in Google's words: "Ice cream shop". */
   kind: string;
+  /** Google's one-line description of the place and what it is known for, when it has one. */
+  summary: string | null;
   point: Point | null;
   /** Open at the moment of the search. Null when Google doesn't know. */
   open: boolean | null;
@@ -46,6 +49,7 @@ interface RawPlace {
   formattedAddress?: string;
   shortFormattedAddress?: string;
   primaryTypeDisplayName?: { text?: string };
+  editorialSummary?: { text?: string };
   location?: { latitude?: number; longitude?: number };
   currentOpeningHours?: { openNow?: boolean; nextCloseTime?: string };
   rating?: number;
@@ -108,6 +112,58 @@ export async function findAddress(typed: string): Promise<{ address: string; poi
   return first?.formattedAddress && point ? { address: first.formattedAddress, point } : null;
 }
 
+/** An address Google offers for what has been typed so far. */
+export interface AddressSuggestion {
+  /** The whole address, as it should be looked up and saved. */
+  text: string;
+  /** The street part, and the rest, for showing on two levels. */
+  main: string;
+  secondary: string;
+}
+
+interface RawSuggestion {
+  placePrediction?: { text?: { text?: string }; structuredFormat?: { mainText?: { text?: string }; secondaryText?: { text?: string } } };
+}
+
+/**
+ * Street addresses in the US that match the typed start of one, nearest the
+ * saved address first when there is one. Shown as typed-ahead suggestions;
+ * nothing from here is stored.
+ */
+export async function suggestAddresses(typed: string, options: { near?: Point | null; session?: string } = {}): Promise<AddressSuggestion[]> {
+  const key = process.env.GOOGLE_MAPS_API_KEY?.trim();
+  if (!key) throw new PlacesError("places not configured");
+  let res: Response;
+  try {
+    res = await fetch(`${base()}/v1/places:autocomplete`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Goog-Api-Key": key },
+      body: JSON.stringify({
+        input: typed,
+        includedRegionCodes: ["us"],
+        includedPrimaryTypes: ["street_address", "premise", "subpremise", "route"],
+        ...(options.session ? { sessionToken: options.session } : {}),
+        ...(options.near ? { locationBias: { circle: { center: { latitude: options.near.lat, longitude: options.near.lng }, radius: 50000 } } } : {}),
+      }),
+      cache: "no-store",
+      signal: AbortSignal.timeout(4000),
+    });
+  } catch (cause) {
+    console.error("[places] no response", cause instanceof Error ? cause.name : "");
+    throw new PlacesError("no response");
+  }
+  if (!res.ok) {
+    console.error(`[places] ${res.status} ${(await res.text().catch(() => "")).replace(/\s+/g, " ").slice(0, 300)}`);
+    throw new PlacesError(String(res.status));
+  }
+  const tidy = (text: string | undefined) => (text ?? "").replace(/,\s*(USA|United States)$/i, "").trim();
+  return (((await res.json()) as { suggestions?: RawSuggestion[] }).suggestions ?? [])
+    .map((s) => s.placePrediction)
+    .filter((p) => p?.text?.text)
+    .slice(0, 5)
+    .map((p) => ({ text: tidy(p!.text!.text), main: tidy(p!.structuredFormat?.mainText?.text) || tidy(p!.text!.text), secondary: tidy(p!.structuredFormat?.secondaryText?.text) }));
+}
+
 /** How far around the saved address to lean the search, in metres. */
 const NEARBY_RADIUS = 8000;
 
@@ -134,7 +190,7 @@ export async function searchPlaces(search: PlaceSearch): Promise<Place[]> {
       ...(search.openNow ? { openNow: true } : {}),
       ...(!area && search.near ? { locationBias: { circle: { center: { latitude: search.near.lat, longitude: search.near.lng }, radius: NEARBY_RADIUS } } } : {}),
     },
-    ["id", "displayName", "shortFormattedAddress", "formattedAddress", "primaryTypeDisplayName", "location", "currentOpeningHours", "rating", "userRatingCount", "priceLevel", "websiteUri", "googleMapsUri", "businessStatus"],
+    ["id", "displayName", "shortFormattedAddress", "formattedAddress", "primaryTypeDisplayName", "editorialSummary", "location", "currentOpeningHours", "rating", "userRatingCount", "priceLevel", "websiteUri", "googleMapsUri", "businessStatus"],
   );
   return raw
     .filter((p) => p.id && p.displayName?.text && (!p.businessStatus || p.businessStatus === "OPERATIONAL"))
@@ -143,6 +199,7 @@ export async function searchPlaces(search: PlaceSearch): Promise<Place[]> {
       name: p.displayName!.text!.trim(),
       address: p.shortFormattedAddress ?? p.formattedAddress ?? "",
       kind: p.primaryTypeDisplayName?.text ?? "",
+      summary: p.editorialSummary?.text?.trim().slice(0, 240) || null,
       point: pointOf(p),
       open: typeof p.currentOpeningHours?.openNow === "boolean" ? p.currentOpeningHours.openNow : null,
       closes: p.currentOpeningHours?.openNow === true && !Number.isNaN(Date.parse(p.currentOpeningHours.nextCloseTime ?? "")) ? p.currentOpeningHours.nextCloseTime! : null,
