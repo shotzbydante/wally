@@ -210,9 +210,12 @@ body {
 .composer:focus-within {
   box-shadow: 0 0 0 4px rgba(60, 194, 143, 0.2), 0 18px 44px -20px rgba(14, 124, 87, 0.55);
 }
-/* The dock under the conversation fades in from the page, with a breath of mint at the foot. */
+/* The dock under the conversation: the thread fades out in its top few pixels, and from there down it is solid,
+   so nothing shows through behind the message box. The shadow carries the same colour 100px below it, because
+   iOS Safari paints the page underneath its floating toolbar and the keyboard's bar. A shadow adds no scroll height. */
 .dock {
-  background-image: linear-gradient(180deg, rgba(244, 246, 250, 0) 0%, rgba(244, 246, 250, 0.94) 14%, #eef6f3 100%);
+  background-image: linear-gradient(180deg, rgba(244, 246, 250, 0) 0, var(--paper) 12px, #eef6f3 100%);
+  box-shadow: 0 100px 0 0 #eef6f3;
 }
 /* Sticky strips let the conversation fade out beneath them instead of cutting it off. */
 .fade-under::after {
