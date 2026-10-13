@@ -1,6 +1,6 @@
 import { createHmac } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { chunks, keywordOf, sameSecret, twilioSignatureValid, usPhone } from "./texting";
+import { chunks, connectCode, keywordOf, readConnectCode, sameSecret, twilioSignatureValid, usPhone } from "./texting";
 
 describe("texting", () => {
   it("reads a US number however the provider writes it", () => {
@@ -34,6 +34,18 @@ describe("texting", () => {
     expect(twilioSignatureValid(url, { ...params, Body: "pizza" }, signature, "token")).toBe(false);
     expect(twilioSignatureValid("https://evil.example/api/text/twilio", params, signature, "token")).toBe(false);
     expect(twilioSignatureValid(url, params, "", "token")).toBe(false);
+  });
+  it("reads its own connect code out of a text, for two days, and nobody else's", () => {
+    const id = "3f2c1a9e-7b4d-4e6f-8a1b-2c3d4e5f6a7b";
+    const now = Date.UTC(2026, 9, 13, 5);
+    const code = connectCode(id, "s".repeat(32), now);
+    expect(code).toHaveLength(32);
+    expect(readConnectCode(`Hi Wally, connect my phone. Code: ${code}`, "s".repeat(32), now)).toBe(id);
+    expect(readConnectCode(`Code: ${code}`, "s".repeat(32), now + 86_400_000)).toBe(id);
+    expect(readConnectCode(`Code: ${code}`, "s".repeat(32), now + 3 * 86_400_000)).toBeNull();
+    expect(readConnectCode(`Code: ${code}`, "t".repeat(32), now)).toBeNull();
+    expect(readConnectCode(`Code: ${code.slice(0, 31)}x`, "s".repeat(32), now)).toBeNull();
+    expect(readConnectCode("tacos near me, something supercalifragilisticexpialidocious", "s".repeat(32), now)).toBeNull();
   });
   it("compares webhook secrets exactly", () => {
     expect(sameSecret("abc", "abc")).toBe(true);
