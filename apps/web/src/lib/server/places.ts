@@ -30,6 +30,8 @@ export interface Place {
   point: Point | null;
   /** Open at the moment of the search. Null when Google doesn't know. */
   open: boolean | null;
+  /** When it next closes (ISO time), if it is open and Google says. */
+  closes: string | null;
   rating: number | null;
   ratings: number | null;
   /** "$" to "$$$$", or null. */
@@ -45,7 +47,7 @@ interface RawPlace {
   shortFormattedAddress?: string;
   primaryTypeDisplayName?: { text?: string };
   location?: { latitude?: number; longitude?: number };
-  currentOpeningHours?: { openNow?: boolean };
+  currentOpeningHours?: { openNow?: boolean; nextCloseTime?: string };
   rating?: number;
   userRatingCount?: number;
   priceLevel?: string;
@@ -109,6 +111,9 @@ export async function findAddress(typed: string): Promise<{ address: string; poi
 /** How far around the saved address to lean the search, in metres. */
 const NEARBY_RADIUS = 8000;
 
+/** Places asked for in one search. Google allows up to 20, which is five screens of four. */
+const PAGE_SIZE = 20;
+
 export interface PlaceSearch {
   /** What to look for: "dessert", "ramen", "late night tacos". */
   query: string;
@@ -125,7 +130,7 @@ export async function searchPlaces(search: PlaceSearch): Promise<Place[]> {
   const raw = await searchText(
     {
       textQuery: area ? `${search.query} near ${area}` : search.query,
-      pageSize: 12,
+      pageSize: PAGE_SIZE,
       ...(search.openNow ? { openNow: true } : {}),
       ...(!area && search.near ? { locationBias: { circle: { center: { latitude: search.near.lat, longitude: search.near.lng }, radius: NEARBY_RADIUS } } } : {}),
     },
@@ -140,6 +145,7 @@ export async function searchPlaces(search: PlaceSearch): Promise<Place[]> {
       kind: p.primaryTypeDisplayName?.text ?? "",
       point: pointOf(p),
       open: typeof p.currentOpeningHours?.openNow === "boolean" ? p.currentOpeningHours.openNow : null,
+      closes: p.currentOpeningHours?.openNow === true && !Number.isNaN(Date.parse(p.currentOpeningHours.nextCloseTime ?? "")) ? p.currentOpeningHours.nextCloseTime! : null,
       rating: typeof p.rating === "number" ? p.rating : null,
       ratings: typeof p.userRatingCount === "number" ? p.userRatingCount : null,
       price: PRICE[p.priceLevel ?? ""] ?? null,

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { deliveryLinks } from "@/lib/chat";
-import { describePlaces, placeChoices, type FoundPlace } from "./agent";
+import { describePlaces, placeChoices, shownPlaces, type FoundPlace } from "./agent";
 import { findAddress, milesBetween, searchPlaces } from "./places";
 
 afterEach(() => {
@@ -43,20 +43,20 @@ describe("findAddress", () => {
 });
 
 describe("searchPlaces", () => {
-  const raw = { id: "abc", displayName: { text: " Milk Bar " }, shortFormattedAddress: "7150 Melrose Ave", primaryTypeDisplayName: { text: "Dessert shop" }, location: { latitude: 34.08, longitude: -118.34 }, currentOpeningHours: { openNow: true }, rating: 4.5, userRatingCount: 812, priceLevel: "PRICE_LEVEL_MODERATE", websiteUri: "https://milkbarstore.com/", googleMapsUri: "https://maps.google.com/?cid=1" };
+  const raw = { id: "abc", displayName: { text: " Milk Bar " }, shortFormattedAddress: "7150 Melrose Ave", primaryTypeDisplayName: { text: "Dessert shop" }, location: { latitude: 34.08, longitude: -118.34 }, currentOpeningHours: { openNow: true, nextCloseTime: "2026-10-13T04:00:00Z" }, rating: 4.5, userRatingCount: 812, priceLevel: "PRICE_LEVEL_MODERATE", websiteUri: "https://milkbarstore.com/", googleMapsUri: "https://maps.google.com/?cid=1" };
 
   it("leans toward the saved address and tidies what comes back", async () => {
     const calls = google([raw, { ...raw, id: "gone", businessStatus: "CLOSED_PERMANENTLY" }, { id: "bare", displayName: { text: "Bare" }, websiteUri: "javascript:alert(1)" }]);
     expect(await searchPlaces({ query: "dessert", near: home, openNow: true })).toEqual([
-      { id: "abc", name: "Milk Bar", address: "7150 Melrose Ave", kind: "Dessert shop", point: { lat: 34.08, lng: -118.34 }, open: true, rating: 4.5, ratings: 812, price: "$$", website: "https://milkbarstore.com/", maps: "https://maps.google.com/?cid=1" },
-      { id: "bare", name: "Bare", address: "", kind: "", point: null, open: null, rating: null, ratings: null, price: null, website: null, maps: "https://www.google.com/maps/place/?q=place_id:bare" },
+      { id: "abc", name: "Milk Bar", address: "7150 Melrose Ave", kind: "Dessert shop", point: { lat: 34.08, lng: -118.34 }, open: true, closes: "2026-10-13T04:00:00Z", rating: 4.5, ratings: 812, price: "$$", website: "https://milkbarstore.com/", maps: "https://maps.google.com/?cid=1" },
+      { id: "bare", name: "Bare", address: "", kind: "", point: null, open: null, closes: null, rating: null, ratings: null, price: null, website: null, maps: "https://www.google.com/maps/place/?q=place_id:bare" },
     ]);
-    expect(calls[0]!.body).toEqual({ textQuery: "dessert", pageSize: 12, openNow: true, locationBias: { circle: { center: { latitude: 34.0639, longitude: -118.3592 }, radius: 8000 } } });
+    expect(calls[0]!.body).toEqual({ textQuery: "dessert", pageSize: 20, openNow: true, locationBias: { circle: { center: { latitude: 34.0639, longitude: -118.3592 }, radius: 8000 } } });
   });
   it("searches a named area instead of the saved address", async () => {
     const calls = google([]);
     await searchPlaces({ query: "dessert", near: home, area: "Koreatown" });
-    expect(calls[0]!.body).toEqual({ textQuery: "dessert near Koreatown", pageSize: 12 });
+    expect(calls[0]!.body).toEqual({ textQuery: "dessert near Koreatown", pageSize: 20 });
   });
   it("throws when Google refuses", async () => {
     google([], 403);
@@ -65,7 +65,7 @@ describe("searchPlaces", () => {
 });
 
 describe("place cards", () => {
-  const place = (id: string, name: string, open: boolean | null, miles?: number): FoundPlace => ({ id, name, address: "1 Main St", kind: "Bakery", point: null, open, rating: 4.5, ratings: 10, price: null, website: open ? `https://${id}.example/` : null, maps: `https://maps.example/${id}`, miles });
+  const place = (id: string, name: string, open: boolean | null, miles?: number): FoundPlace => ({ id, name, address: "1 Main St", kind: "Bakery", point: null, open, closes: null, rating: 4.5, ratings: 10, price: null, website: open ? `https://${id}.example/` : null, maps: `https://maps.example/${id}`, miles });
   const found = new Map<string, FoundPlace>([
     ["p1", place("far", "Far Open", true, 3.2)],
     ["p2", place("closed", "Closed Close", false, 0.1)],
@@ -96,6 +96,17 @@ describe("place cards", () => {
       { id: "p4", name: "Unknown Hours", kind: "Bakery", miles: 0.9, open_now: "unknown", rating: 4.5, ratings: 10, address: "1 Main St" },
     ]);
     expect(describePlaces(found, [])).toMatch(/No places matched/);
+  });
+  it("tells Claude when a place closes, in the person's time, and which he has already shown", () => {
+    const again = new Map<string, FoundPlace>([["p1", { ...place("near", "Near Open", true, 0.4), closes: "2026-10-13T04:00:00Z", shown: true }]]);
+    expect(JSON.parse(describePlaces(again, ["p1"], "America/Los_Angeles"))[0]).toMatchObject({ closes: "9:00 PM", already_shown: true });
+    // Without a time zone the hour would be a guess.
+    expect(JSON.parse(describePlaces(again, ["p1"]))[0].closes).toBeUndefined();
+  });
+  it("collects the places earlier answers showed", () => {
+    const card = (id: string) => ({ emoji: "🍰", title: id, detail: "", reply: id, place: { id, maps: "https://maps.example" } });
+    const message = (id: number, choices: ReturnType<typeof card>[] | null) => ({ id, role: "assistant" as const, channel: "web" as const, content: "", choices, created_at: "2026-10-12T00:00:00Z" });
+    expect([...shownPlaces([message(1, [card("a"), card("b")]), message(2, null), message(3, [card("c")])])]).toEqual(["a", "b", "c"]);
   });
 });
 

@@ -341,7 +341,7 @@ export function AskWally({
           </div>
         )}
 
-        <div className={`flex flex-1 flex-col justify-end gap-2.5 py-3 ${empty ? "min-[900px]:flex-none min-[900px]:pt-8" : ""}`} role="log" aria-label="Conversation with Wally">
+        <div className={`flex flex-1 flex-col justify-end gap-2.5 pt-3 pb-1 ${empty ? "min-[900px]:flex-none min-[900px]:pt-8" : ""}`} role="log" aria-label="Conversation with Wally">
           {empty && ready && (
             <ul className="grid gap-2.5 sm:grid-cols-2" aria-label="Things to ask Wally">
               {starters.map((s, i) => (
@@ -363,7 +363,7 @@ export function AskWally({
             m.role === "user" ? (
               <UserBubble key={m.id} text={m.content} byText={m.channel === "text"} />
             ) : (
-              <WallyTurn key={m.id} text={m.content} at={m.created_at} byText={m.channel === "text"} choices={m.choices} live={m.id === lastId && !busy && ready} onPick={(c) => void send(c.reply)} />
+              <WallyTurn key={m.id} text={m.content} at={m.created_at} byText={m.channel === "text"} choices={m.choices} live={m.id === lastId && !busy && ready} onPick={(c) => void send(c.reply)} onMore={() => void send("Show me 4 more")} />
             ),
           )}
 
@@ -505,6 +505,7 @@ function WallyTurn({
   writing = false,
   live = false,
   onPick,
+  onMore,
 }: {
   text: string;
   /** When Wally said it. */
@@ -515,6 +516,8 @@ function WallyTurn({
   /** Only the latest answer's options can still be picked. */
   live?: boolean;
   onPick?: (choice: Choice) => void;
+  /** Asks Wally for the next four places. */
+  onMore?: () => void;
 }) {
   // Sources ride along in the text (see splitSources); here they become links.
   const { text: said, sources } = splitSources(text);
@@ -544,7 +547,7 @@ function WallyTurn({
               className={`card flex flex-col overflow-hidden rounded-2xl bg-pad ring-1 ring-line transition-shadow ring-inset ${live ? "arrive hover:ring-2 hover:ring-green" : "opacity-70"}`}
               style={{ "--d": `${i * 70}ms` } as CSSProperties}
             >
-              <button type="button" disabled={!live} onClick={() => onPick?.(c)} className={`press flex w-full flex-1 items-start gap-2.5 px-2.5 pt-2.5 text-left ${c.place ? "pb-1.5" : "pb-2.5"}`}>
+              <button type="button" disabled={!live} onClick={() => onPick?.(c)} className={`press flex w-full flex-1 items-start gap-2.5 px-2.5 text-left ${c.place ? "pt-2 pb-1.5" : "py-2.5"}`}>
                 <Tile>{c.emoji}</Tile>
                 <span className="min-w-0 flex-1">
                   <span className="flex items-baseline gap-2">
@@ -560,7 +563,7 @@ function WallyTurn({
                 </span>
               </button>
               {c.place && (
-                <p className="flex flex-wrap items-center gap-1.5 px-2.5 pb-2.5 text-[0.8rem] font-semibold text-green-deep">
+                <p className="flex flex-wrap items-center gap-1.5 px-2.5 pb-2 text-[0.8rem] font-semibold text-green-deep">
                   {[
                     // The restaurant's own site leads, and stands out from the apps beside it.
                     ...(c.place.website ? [isOwnSite(c.place.website) ? { label: "Their own site", url: c.place.website, lead: true } : { label: "Website", url: c.place.website }] : []),
@@ -598,9 +601,19 @@ function WallyTurn({
       )}
       {places && (
         // Google's attribution rules for Places data shown without a map: the words "Google Maps", untranslated.
-        <p className="mt-1 text-[0.8125rem] leading-tight whitespace-nowrap" style={{ fontFamily: "Roboto, sans-serif", fontWeight: 400, color: "#5E5E5E" }}>
-          <span translate="no">Google Maps</span>
-        </p>
+        <div className="mt-1 flex min-h-7 items-center justify-between gap-3">
+          <p className="text-[0.8125rem] leading-tight whitespace-nowrap" style={{ fontFamily: "Roboto, sans-serif", fontWeight: 400, color: "#5E5E5E" }}>
+            <span translate="no">Google Maps</span>
+          </p>
+          {live && onMore && (
+            <button type="button" onClick={onMore} className="press chip-lead inline-flex h-7 items-center gap-1 rounded-full px-3 text-[0.8rem] font-semibold text-green-deep ring-1 ring-mint/50 ring-inset hover:ring-green">
+              See 4 more
+              <svg viewBox="0 0 24 24" className="size-3.5" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="m6 9 6 6 6-6" />
+              </svg>
+            </button>
+          )}
+        </div>
       )}
       {sources.length > 0 && (
         <p className="mt-2 flex flex-wrap items-center gap-x-1.5 gap-y-1.5 text-[0.85rem] text-ink-soft">
