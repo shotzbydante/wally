@@ -37,7 +37,8 @@ const FINDING_WITH_PLACES = `# Finding places
 - If they have no saved address (see the guest notes) and haven't named a neighborhood, city or ZIP, ask them in one short line to add their address in the bar at the top of the page, or to name an area. If they name an area, pass it as area.
 - Don't announce that you're going to look. Just call the tool.
 - Then call show_places with the ids of the four that fit best (fewer only if fewer fit), favoring places that are open and close by. For each place give one short reason it fits.
-- Before show_places, write one or two sentences, under 40 words, the way a waiter recommends: lead with your top pick by name and why, using what find_places told you (it's the closest, it's still open and until when, it's the best rated, its price). You may add one more standout. Don't walk through every place; the cards do that.
+- Before show_places, write one or two sentences, under 40 words, the way a waiter recommends: lead with your top pick by name and why, using what find_places told you (what it's known for, it's the closest, it's still open and until when, it's the best rated, its price). You may add one more standout. Don't walk through every place; the cards do that.
+- known_for is the listing's own description of a place. When a place has one, use it: say what the place is known for in your recommendation and in its card's reason, in your own few words. It is the only thing you know about what a place serves. If a place has no known_for, don't guess one.
 - Say only what find_places told you about a place. Never add an address, hours, price, dish, menu item or review from memory. You don't know what any place has on its menu or in stock today, so never say a dish or cake is available.
 - When the person asks to see more, call find_places again with the same query, then show the next four that are not marked already_shown. If everything is already_shown, try one different wording of the query. If there is still nothing new, say that's everything nearby and offer to widen the search. Your sentence before these cards can be shorter.
 - Give the person real choice. Look past the obvious names: neighborhood and independent places belong beside the well-known ones. When two places fit equally well, pick the independent one with its own site (own_site in the results) over a chain.
@@ -134,7 +135,7 @@ const CHOICES_TOOL: Anthropic.Tool = {
 const FIND_PLACES_TOOL: Anthropic.Tool = {
   name: "find_places",
   description:
-    "Search real, current listings for places to eat or drink. Returns up to 20 places with an id, name, kind, distance in miles from the person's saved address, whether it is open right now and when it closes, rating, price, own_site when the restaurant has a site of its own, and already_shown when you have shown it earlier in this conversation. Searches near the saved address unless you pass area.",
+    "Search real, current listings for places to eat or drink. Returns up to 20 places with an id, name, kind, known_for (what the listing says the place is known for, when it says), distance in miles from the person's saved address, whether it is open right now and when it closes, rating, price, own_site when the restaurant has a site of its own, and already_shown when you have shown it earlier in this conversation. Searches near the saved address unless you pass area.",
   input_schema: {
     type: "object",
     properties: {
@@ -283,6 +284,7 @@ export function describePlaces(found: ReadonlyMap<string, FoundPlace>, ids: stri
       id,
       name: p.name,
       kind: p.kind || undefined,
+      known_for: p.summary || undefined,
       miles: p.miles,
       open_now: p.open ?? "unknown",
       closes: closingTime(p.closes, timeZone),

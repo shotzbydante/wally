@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { deliveryLinks } from "@/lib/chat";
 import { describePlaces, placeChoices, shownPlaces, type FoundPlace } from "./agent";
-import { findAddress, milesBetween, searchPlaces } from "./places";
+import { findAddress, milesBetween, searchPlaces, suggestAddresses } from "./places";
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -43,13 +43,13 @@ describe("findAddress", () => {
 });
 
 describe("searchPlaces", () => {
-  const raw = { id: "abc", displayName: { text: " Milk Bar " }, shortFormattedAddress: "7150 Melrose Ave", primaryTypeDisplayName: { text: "Dessert shop" }, location: { latitude: 34.08, longitude: -118.34 }, currentOpeningHours: { openNow: true, nextCloseTime: "2026-10-13T04:00:00Z" }, rating: 4.5, userRatingCount: 812, priceLevel: "PRICE_LEVEL_MODERATE", websiteUri: "https://milkbarstore.com/", googleMapsUri: "https://maps.google.com/?cid=1" };
+  const raw = { id: "abc", displayName: { text: " Milk Bar " }, shortFormattedAddress: "7150 Melrose Ave", primaryTypeDisplayName: { text: "Dessert shop" }, editorialSummary: { text: " Playful bakery known for cereal milk soft serve. " }, location: { latitude: 34.08, longitude: -118.34 }, currentOpeningHours: { openNow: true, nextCloseTime: "2026-10-13T04:00:00Z" }, rating: 4.5, userRatingCount: 812, priceLevel: "PRICE_LEVEL_MODERATE", websiteUri: "https://milkbarstore.com/", googleMapsUri: "https://maps.google.com/?cid=1" };
 
   it("leans toward the saved address and tidies what comes back", async () => {
     const calls = google([raw, { ...raw, id: "gone", businessStatus: "CLOSED_PERMANENTLY" }, { id: "bare", displayName: { text: "Bare" }, websiteUri: "javascript:alert(1)" }]);
     expect(await searchPlaces({ query: "dessert", near: home, openNow: true })).toEqual([
-      { id: "abc", name: "Milk Bar", address: "7150 Melrose Ave", kind: "Dessert shop", point: { lat: 34.08, lng: -118.34 }, open: true, closes: "2026-10-13T04:00:00Z", rating: 4.5, ratings: 812, price: "$$", website: "https://milkbarstore.com/", maps: "https://maps.google.com/?cid=1" },
-      { id: "bare", name: "Bare", address: "", kind: "", point: null, open: null, closes: null, rating: null, ratings: null, price: null, website: null, maps: "https://www.google.com/maps/place/?q=place_id:bare" },
+      { id: "abc", name: "Milk Bar", address: "7150 Melrose Ave", kind: "Dessert shop", summary: "Playful bakery known for cereal milk soft serve.", point: { lat: 34.08, lng: -118.34 }, open: true, closes: "2026-10-13T04:00:00Z", rating: 4.5, ratings: 812, price: "$$", website: "https://milkbarstore.com/", maps: "https://maps.google.com/?cid=1" },
+      { id: "bare", name: "Bare", address: "", kind: "", summary: null, point: null, open: null, closes: null, rating: null, ratings: null, price: null, website: null, maps: "https://www.google.com/maps/place/?q=place_id:bare" },
     ]);
     expect(calls[0]!.body).toEqual({ textQuery: "dessert", pageSize: 20, openNow: true, locationBias: { circle: { center: { latitude: 34.0639, longitude: -118.3592 }, radius: 8000 } } });
   });
@@ -64,8 +64,29 @@ describe("searchPlaces", () => {
   });
 });
 
+describe("suggestAddresses", () => {
+  it("asks for US street addresses near the saved one and tidies the answers", async () => {
+    const calls: { url: string; body: Record<string, unknown> }[] = [];
+    vi.stubEnv("GOOGLE_MAPS_API_KEY", "key");
+    vi.stubGlobal("fetch", async (url: string, init: RequestInit) => {
+      calls.push({ url, body: JSON.parse(init.body as string) });
+      return new Response(JSON.stringify({ suggestions: [
+        { placePrediction: { text: { text: "215 S Mansfield Ave, Los Angeles, CA, USA" }, structuredFormat: { mainText: { text: "215 S Mansfield Ave" }, secondaryText: { text: "Los Angeles, CA, USA" } } } },
+        { queryPrediction: { text: { text: "215 south" } } },
+      ] }));
+    });
+    expect(await suggestAddresses("215 S", { near: home, session: "abcd-1234" })).toEqual([{ text: "215 S Mansfield Ave, Los Angeles, CA", main: "215 S Mansfield Ave", secondary: "Los Angeles, CA" }]);
+    expect(calls[0]!.url).toBe("https://places.googleapis.com/v1/places:autocomplete");
+    expect(calls[0]!.body).toMatchObject({ input: "215 S", includedRegionCodes: ["us"], sessionToken: "abcd-1234", locationBias: { circle: { center: { latitude: 34.0639, longitude: -118.3592 } } } });
+  });
+  it("throws when Google refuses", async () => {
+    google([], 403);
+    await expect(suggestAddresses("215 S")).rejects.toThrow("403");
+  });
+});
+
 describe("place cards", () => {
-  const place = (id: string, name: string, open: boolean | null, miles?: number): FoundPlace => ({ id, name, address: "1 Main St", kind: "Bakery", point: null, open, closes: null, rating: 4.5, ratings: 10, price: null, website: open ? `https://${id}.example/` : null, maps: `https://maps.example/${id}`, miles });
+  const place = (id: string, name: string, open: boolean | null, miles?: number): FoundPlace => ({ id, name, address: "1 Main St", kind: "Bakery", summary: null, point: null, open, closes: null, rating: 4.5, ratings: 10, price: null, website: open ? `https://${id}.example/` : null, maps: `https://maps.example/${id}`, miles });
   const found = new Map<string, FoundPlace>([
     ["p1", place("far", "Far Open", true, 3.2)],
     ["p2", place("closed", "Closed Close", false, 0.1)],
@@ -98,8 +119,8 @@ describe("place cards", () => {
     expect(describePlaces(found, [])).toMatch(/No places matched/);
   });
   it("tells Claude when a place closes, in the person's time, and which he has already shown", () => {
-    const again = new Map<string, FoundPlace>([["p1", { ...place("near", "Near Open", true, 0.4), closes: "2026-10-13T04:00:00Z", shown: true }]]);
-    expect(JSON.parse(describePlaces(again, ["p1"], "America/Los_Angeles"))[0]).toMatchObject({ closes: "9:00 PM", already_shown: true });
+    const again = new Map<string, FoundPlace>([["p1", { ...place("near", "Near Open", true, 0.4), closes: "2026-10-13T04:00:00Z", shown: true, summary: "Known for layer cakes." }]]);
+    expect(JSON.parse(describePlaces(again, ["p1"], "America/Los_Angeles"))[0]).toMatchObject({ closes: "9:00 PM", already_shown: true, known_for: "Known for layer cakes." });
     // Without a time zone the hour would be a guess.
     expect(JSON.parse(describePlaces(again, ["p1"]))[0].closes).toBeUndefined();
   });
