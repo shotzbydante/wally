@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cityOf, deliveryLinks } from "@/lib/chat";
-import { describePlaces, placeChoices, shownPlaces, type FoundPlace } from "./agent";
+import { describePlaces, placeChoices, placesIntro, shownPlaces, type FoundPlace } from "./agent";
 import { findAddress, milesBetween, searchPlaces, suggestAddresses } from "./places";
 
 afterEach(() => {
@@ -133,6 +133,11 @@ describe("place cards", () => {
     expect(JSON.parse(describePlaces(again, ["p1"], "America/Los_Angeles"))[0]).toMatchObject({ closes: "9:00 PM", already_shown: true, known_for: "Known for layer cakes." });
     // Without a time zone the hour would be a guess.
     expect(JSON.parse(describePlaces(again, ["p1"]))[0].closes).toBeUndefined();
+  });
+  it("always has a line above the cards: Wally's own, or a plain one from the first card", () => {
+    const cards = placeChoices(pick("p3", "p1"), found)!;
+    expect(placesIntro({ intro: " If it were my night off, I'd head to Near Open. " }, cards)).toBe("If it were my night off, I'd head to Near Open.");
+    expect(placesIntro({}, cards)).toBe("I'd start with Near Open: 0.4 miles away, open now, rated 4.5. A few more worth a look are below.");
   });
   it("collects the places earlier answers showed", () => {
     const card = (id: string) => ({ emoji: "🍰", title: id, detail: "", reply: id, place: { id, maps: "https://maps.example" } });
