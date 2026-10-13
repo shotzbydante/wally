@@ -14,6 +14,7 @@ import { loadMessages } from "@/lib/server/conversation";
 import { DbError } from "@/lib/server/db";
 import { placesConfigured } from "@/lib/server/places";
 import { SESSION_COOKIE, sessionSecret } from "@/lib/server/session";
+import { firstTextLink } from "@/lib/signup";
 
 export const metadata: Metadata = { title: "Ask Wally" };
 
@@ -59,6 +60,7 @@ async function Ask() {
     return <Notice title="Ask Wally isn’t switched on yet." detail="It needs Wally’s database, which isn’t connected." />;
   }
 
+  const wallyNumber = process.env.NEXT_PUBLIC_WALLY_NUMBER ?? null;
   let messages: ChatMessage[];
   try {
     messages = await loadMessages(loaded.account.id);
@@ -73,7 +75,10 @@ async function Ask() {
 
   return (
     <>
-      <SignedInHeader active="/ask" />
+      <SignedInHeader
+        active="/ask"
+        text={wallyNumber ? { href: loaded.account.phone ? firstTextLink(wallyNumber, "") : "/account#texting", connected: Boolean(loaded.account.phone) } : undefined}
+      />
       <AskWally name={loaded.account.name} initial={messages} ready={agentConfigured()} places={placesConfigured()} address={loaded.account.address ?? null} />
     </>
   );

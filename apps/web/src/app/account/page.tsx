@@ -66,7 +66,7 @@ async function Account({ searchParams }: { searchParams: Query }) {
 
   return (
     <>
-      <SignedInHeader active="/account" />
+      <SignedInHeader active="/account" text={wallyNumber ? { href: session.phone ? firstTextLink(wallyNumber, "") : "#texting", connected: Boolean(session.phone) } : undefined} />
 
       <main className="mx-auto w-full max-w-[640px] flex-1 px-5 pt-6 pb-16 sm:px-8">
         {eraseFailed && (
@@ -86,14 +86,58 @@ async function Account({ searchParams }: { searchParams: Query }) {
           </div>
         </div>
 
-        <Section title="Contact" subtitle="Ways to reach Wally directly">
-          <Row
-            icon={<Glyph>💬</Glyph>}
-            title="Messages"
-            detail={wallyNumber ? formatUsPhone(wallyNumber) : "Wally’s phone line isn’t open yet"}
-            action={wallyNumber ? <Action href={firstTextLink(wallyNumber)}>Text Wally</Action> : <Soon>Not open yet</Soon>}
-          />
-        </Section>
+        {wallyNumber && (
+          // The one thing to do next: text him, or connect the phone so he knows who is texting.
+          <div id="texting" className="card mt-8 scroll-mt-6 rounded-3xl bg-pad p-5 ring-1 ring-line ring-inset sm:p-6" style={{ backgroundImage: "linear-gradient(135deg, #e3f7ec 0%, #ffffff 55%, #fdf6dc 100%)" }}>
+            {session.phone ? (
+              <>
+                <p className="inline-flex h-7 items-center gap-1.5 rounded-full bg-pad px-3 text-[0.85rem] font-semibold text-green-deep ring-1 ring-mint/50 ring-inset">
+                  <span className="size-2 rounded-full bg-mint shadow-[0_0_0_3px_rgba(60,194,143,0.25)]" aria-hidden="true" />
+                  Connected
+                </p>
+                <h2 className="mt-3 font-display text-[1.5rem] leading-tight font-bold tracking-[-0.02em]">Text Wally at {formatUsPhone(wallyNumber)}</h2>
+                <p className="mt-1 text-ink-soft">
+                  Texts from +1 {formatUsPhone(session.phone)} and this site are one conversation. Start here, carry on there.
+                </p>
+                <div className="mt-4 flex flex-wrap gap-2">
+                  <a href={firstTextLink(wallyNumber, "")} className="press fill-green inline-flex h-11 items-center rounded-xl bg-green px-5 font-semibold text-white hover:brightness-110">
+                    Text Wally
+                  </a>
+                  <a href="/wally.vcf" className="press inline-flex h-11 items-center rounded-xl bg-pad px-4 font-semibold ring-1 ring-line ring-inset hover:ring-ink">
+                    Save his contact
+                  </a>
+                </div>
+              </>
+            ) : (
+              <>
+                <p className="inline-flex h-7 items-center gap-1.5 rounded-full bg-pad px-3 text-[0.85rem] font-semibold text-ink-soft ring-1 ring-line ring-inset">
+                  <span className="size-2 rounded-full bg-ink-soft/50" aria-hidden="true" />
+                  Phone not connected
+                </p>
+                <h2 className="mt-3 font-display text-[1.5rem] leading-tight font-bold tracking-[-0.02em]">Text with Wally from your phone</h2>
+                <p className="mt-1 text-ink-soft">
+                  {connectLink
+                    ? "Open this page on your phone, tap the button and send the message it writes. That tells Wally the number is yours, and your texts join this conversation."
+                    : `His number is ${formatUsPhone(wallyNumber)}. Add your mobile number below so he knows it’s you.`}
+                </p>
+                <div className="mt-4">
+                  {connectLink ? (
+                    <a href={connectLink} className="press fill-green inline-flex h-11 items-center rounded-xl bg-green px-5 font-semibold text-white hover:brightness-110">
+                      Connect by text
+                    </a>
+                  ) : (
+                    <Action href="/join?link=1">Add your number</Action>
+                  )}
+                </div>
+              </>
+            )}
+          </div>
+        )}
+        {!wallyNumber && (
+          <Section title="Contact" subtitle="Ways to reach Wally directly">
+            <Row icon={<Glyph>💬</Glyph>} title="Messages" detail="Wally’s phone line isn’t open yet" action={<Soon>Not open yet</Soon>} />
+          </Section>
+        )}
 
         <Section title="Name" subtitle="What Wally calls you">
           <NameForm initial={session.name} />
@@ -103,7 +147,7 @@ async function Account({ searchParams }: { searchParams: Query }) {
           <Row
             icon={<Glyph>📱</Glyph>}
             title="Phone"
-            detail={session.phone ? `+1 ${formatUsPhone(session.phone)}` : "Not linked"}
+            detail={session.phone ? `+1 ${formatUsPhone(session.phone)}${wallyNumber ? " · connected to Wally by text" : ""}` : "Not linked"}
             action={connectLink && !session.phone ? <Action href={connectLink}>Connect by text</Action> : <Action href="/join?link=1" quiet>{session.phone ? "Change" : "Add"}</Action>}
           />
           <Row
