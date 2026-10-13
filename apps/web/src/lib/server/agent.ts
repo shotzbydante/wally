@@ -1,5 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
-import { asPlainText, hostOf, isOwnSite, withSources, type ChatMessage, type Choice, type Source } from "@/lib/chat";
+import { CURRENT_LOCATION, asPlainText, cityOf, hostOf, isOwnSite, withSources, type ChatMessage, type Choice, type Source } from "@/lib/chat";
 import type { Channel } from "./conversation";
 import { PlacesError, milesBetween, placesConfigured, searchPlaces, type Place, type Point } from "./places";
 
@@ -30,11 +30,14 @@ export interface Guest {
   timeZone?: string;
   /** Where their saved address is. The address itself is never shown to Claude. */
   near?: Point;
+  /** The saved address. Only its city and state are passed on to Claude. */
+  address?: string;
 }
 
 const FINDING_WITH_PLACES = `# Finding places
 - When the person wants somewhere to eat, drink, order from or pick up from, call find_places. It searches real, current listings near their saved address and tells you how far each is and whether it is open right now.
 - If they have no saved address (see the guest notes) and haven't named a neighborhood, city or ZIP, ask them in one short line to add their address in the bar at the top of the page, or to name an area. If they name an area, pass it as area.
+- Results are held to about 25 miles around their saved address. If nothing fits, say so and offer to look in a named area.
 - Don't announce that you're going to look. Just call the tool.
 - Then call show_places with the ids of the four that fit best (fewer only if fewer fit), favoring places that are open and close by. For each place give one short reason it fits.
 - Before show_places, write one or two sentences, under 40 words, the way a waiter recommends: lead with your top pick by name and why, using what find_places told you (what it's known for, it's the closest, it's still open and until when, it's the best rated, its price). You may add one more standout. Don't walk through every place; the cards do that.
@@ -140,7 +143,7 @@ const FIND_PLACES_TOOL: Anthropic.Tool = {
     type: "object",
     properties: {
       query: { type: "string", description: "What to look for, in a few words: 'dessert', 'ramen', 'late night tacos', or a restaurant's name." },
-      area: { type: "string", description: "A neighborhood, city or ZIP the person named. Only when they have no saved address or are asking about somewhere else." },
+      area: { type: "string", description: "A neighborhood, city or ZIP the person named in their latest message. Only when they have no saved address or are plainly asking about somewhere else. Never for 'near me'." },
       open_now: { type: "boolean", description: "True to return only places open right now. Use it when they want to eat now." },
     },
     required: ["query"],
@@ -185,7 +188,11 @@ function searchTool(guest: Guest): Anthropic.WebSearchTool20250305 {
 function guestNotes(guest: Guest, channel: Channel, now: Date): string {
   const lines = ["# This guest"];
   lines.push(guest.name ? `- First name: ${guest.name}.` : "- You don't know their name yet.");
-  if (guest.near) lines.push("- They have a saved address. find_places searches near it automatically; you don't need to ask where they are.");
+  if (guest.near) {
+    const where = guest.address === CURRENT_LOCATION ? "They are sharing their current location" : cityOf(guest.address) ? `Their saved address is in ${cityOf(guest.address)}` : "They have a saved address";
+    lines.push(`- ${where}. find_places searches around it automatically, and "near me" means there; you don't need to ask where they are.`);
+    lines.push("- This can change between messages. Places from earlier in the conversation may be from somewhere else entirely: search afresh every time, never reuse them, and never pass area because of them.");
+  }
   else lines.push(guest.zip ? `- Home ZIP code: ${guest.zip}. No saved address yet.` : "- They have no saved address, and you don't know where they are yet.");
   if (guest.timeZone) {
     const when = new Intl.DateTimeFormat("en-US", { weekday: "long", hour: "numeric", minute: "2-digit", timeZone: guest.timeZone }).format(now);

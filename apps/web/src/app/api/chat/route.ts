@@ -70,7 +70,7 @@ export async function POST(request: Request) {
   if (begun.status === "gone") return json("signed_out", 401);
   if (begun.status === "limited") return json("limited", 429);
   const turn = begun;
-  const guest = { name: who.account.name, zip: who.account.zip, near: who.account.near, timeZone: validTimeZone(body?.timeZone) };
+  const guest = { name: who.account.name, zip: who.account.zip, near: who.account.near, address: who.account.address, timeZone: validTimeZone(body?.timeZone) };
 
   const encoder = new TextEncoder();
   const stream = new ReadableStream<Uint8Array>({
