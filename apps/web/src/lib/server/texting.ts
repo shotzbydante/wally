@@ -156,7 +156,9 @@ async function sendOne(provider: Provider, to: string, body: string, media?: str
       cache: "no-store",
       signal: AbortSignal.timeout(15_000),
     });
-    if (!res.ok) console.error(`[text] sendblue send ${res.status}`);
+    // Sendblue's error body names the cause (bad key, unverified contact) and holds no message text of ours beyond what we sent.
+    if (!res.ok) console.error(`[text] sendblue send ${res.status} ${(await res.text().catch(() => "")).replace(/\s+/g, " ").slice(0, 200)}`);
+    else console.log("[text] sendblue send ok");
     return res.ok;
   } catch (cause) {
     console.error(`[text] ${provider} send: no response`, cause instanceof Error ? cause.name : "");
@@ -226,11 +228,14 @@ export async function handleInbound(inbound: Inbound, origin: string): Promise<v
     const secret = sessionSecret();
     const connectTo = secret ? readConnectCode(text, secret) : null;
     if (connectTo) {
-      await sendText(provider, from, (await linkPhone(connectTo, from)) ? NOTICE.connected : NOTICE.notConnected);
+      const linked = await linkPhone(connectTo, from);
+      console.log(`[text] ${provider}: connect code ${linked ? "linked" : "refused"}`);
+      await sendText(provider, from, linked ? NOTICE.connected : NOTICE.notConnected);
       return;
     }
 
     const begun = await beginTextTurn(from, text, inbound.id);
+    console.log(`[text] ${provider}: ${begun.status}`);
     if (begun.status === "duplicate" || begun.status === "stopped") return;
     if (begun.status === "unknown") {
       // Someone who isn't a member wrote first. One plain answer, and nothing is kept.
