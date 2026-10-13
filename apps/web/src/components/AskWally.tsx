@@ -269,8 +269,8 @@ export function AskWally({
       {/* Wally: beside the conversation on wide screens, above it on narrow ones.
           This box is its own stacking group, so wherever the full render shows it must carry Wally's blend (see globals.css). */}
       <aside
-        className={`z-10 min-[900px]:mix-blend-darken min-[900px]:sticky min-[900px]:flex ${places ? "min-[900px]:top-[3.5rem] min-[900px]:h-[calc(100dvh-7.75rem)]" : "min-[900px]:top-0 min-[900px]:h-[calc(100dvh-4.25rem)]"} min-[900px]:w-[340px] min-[900px]:shrink-0 min-[900px]:flex-col min-[900px]:justify-center min-[900px]:pb-16 ${
-          empty ? "pt-4 mix-blend-darken" : `fade-under sticky ${places ? "top-[3.5rem]" : "top-0"} -mx-5 bg-paper px-5 py-1 sm:-mx-8 sm:px-8 min-[900px]:mx-0 min-[900px]:bg-transparent min-[900px]:px-0 min-[900px]:after:hidden`
+        className={`z-10 min-[900px]:mix-blend-darken min-[900px]:sticky min-[900px]:flex ${places ? "min-[900px]:top-[7.25rem] min-[900px]:h-[calc(100dvh-11.5rem)]" : "min-[900px]:top-[3.75rem] min-[900px]:h-[calc(100dvh-8rem)]"} min-[900px]:w-[340px] min-[900px]:shrink-0 min-[900px]:flex-col min-[900px]:justify-center min-[900px]:pb-16 ${
+          empty ? "pt-4 mix-blend-darken" : `fade-under sticky ${places ? "top-[6.5rem] sm:top-[7.25rem]" : "top-12 sm:top-[3.75rem]"} -mx-5 bg-paper px-5 py-1 sm:-mx-8 sm:px-8 min-[900px]:mx-0 min-[900px]:bg-transparent min-[900px]:px-0 min-[900px]:after:hidden`
         }`}
       >
         <div className={`flex gap-2 min-[900px]:flex-col min-[900px]:gap-0 ${empty ? "items-end" : "items-center"}`}>

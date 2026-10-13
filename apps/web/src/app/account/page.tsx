@@ -9,6 +9,7 @@ import { NameForm } from "@/components/NameForm";
 import { Notice, noticeAction as primary } from "@/components/Notice";
 import { SignedInHeader } from "@/components/SignedInHeader";
 import { Wally } from "@/components/Wally";
+import { brandLogos } from "@/lib/brand-logos";
 import { delivery, reservations, type FoodService } from "@/lib/connectors";
 import { loadAccount } from "@/lib/server/accounts";
 import { SESSION_COOKIE, sessionSecret } from "@/lib/server/session";
@@ -262,11 +263,27 @@ function Row({ icon, title, detail, action }: { icon?: ReactNode; title: string;
 function ServiceRow({ service }: { service: FoodService }) {
   return (
     <Row
-      icon={<Glyph>{service.name.charAt(0)}</Glyph>}
+      icon={<ServiceMark name={service.name} />}
       title={service.name}
       detail={service.blurb}
       action={<Soon>Coming soon</Soon>}
     />
+  );
+}
+
+/** The service's own mark on a white tile, or its initial where we don't hold the mark. */
+function ServiceMark({ name }: { name: string }) {
+  const logo = brandLogos[name];
+  if (!logo) return <Glyph>{name.charAt(0)}</Glyph>;
+  // A pale brand colour can't be read on white, so it becomes the tile and the mark goes dark.
+  const [r, g, b] = [1, 3, 5].map((at) => parseInt(logo.hex.slice(at, at + 2), 16));
+  const pale = 0.2126 * r! + 0.7152 * g! + 0.0722 * b! > 190;
+  return (
+    <span className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-pad ring-1 ring-line ring-inset" style={pale ? { backgroundColor: logo.hex } : undefined} aria-hidden="true">
+      <svg viewBox="0 0 24 24" className="size-6" fill={pale ? "#161a2b" : logo.hex}>
+        <path d={logo.path} />
+      </svg>
+    </span>
   );
 }
 
