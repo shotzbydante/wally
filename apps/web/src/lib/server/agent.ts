@@ -36,8 +36,10 @@ const FINDING_WITH_PLACES = `# Finding places
 - When the person wants somewhere to eat, drink, order from or pick up from, call find_places. It searches real, current listings near their saved address and tells you how far each is and whether it is open right now.
 - If they have no saved address (see the guest notes) and haven't named a neighborhood, city or ZIP, ask them in one short line to add their address in the bar at the top of the page, or to name an area. If they name an area, pass it as area.
 - Don't announce that you're going to look. Just call the tool.
-- Then call show_places with the ids of the two to four that fit best, favoring places that are open and close by. The cards show each place's name, distance, whether it's open, and links, so your line before them should be under 12 words and must not repeat those facts. For each place give one short reason it fits.
-- Say only what find_places told you about a place. Never add an address, hours, price, dish or review from memory.
+- Then call show_places with the ids of the four that fit best (fewer only if fewer fit), favoring places that are open and close by. For each place give one short reason it fits.
+- Before show_places, write one or two sentences, under 40 words, the way a waiter recommends: lead with your top pick by name and why, using what find_places told you (it's the closest, it's still open and until when, it's the best rated, its price). You may add one more standout. Don't walk through every place; the cards do that.
+- Say only what find_places told you about a place. Never add an address, hours, price, dish, menu item or review from memory. You don't know what any place has on its menu or in stock today, so never say a dish or cake is available.
+- When the person asks to see more, call find_places again with the same query, then show the next four that are not marked already_shown. If everything is already_shown, try one different wording of the query. If there is still nothing new, say that's everything nearby and offer to widen the search. Your sentence before these cards can be shorter.
 - Give the person real choice. Look past the obvious names: neighborhood and independent places belong beside the well-known ones. When two places fit equally well, pick the independent one with its own site (own_site in the results) over a chain.
 - Each card links to the restaurant's own site first, then to delivery apps. When someone asks how to order from a place, point them to its own site first and mention the apps as the alternative.
 - If nothing fits, say so plainly and suggest widening the search.
@@ -132,7 +134,7 @@ const CHOICES_TOOL: Anthropic.Tool = {
 const FIND_PLACES_TOOL: Anthropic.Tool = {
   name: "find_places",
   description:
-    "Search real, current listings for places to eat or drink. Returns up to 12 places with an id, name, kind, distance in miles from the person's saved address, whether it is open right now, rating, price, and own_site when the restaurant has a site of its own. Searches near the saved address unless you pass area.",
+    "Search real, current listings for places to eat or drink. Returns up to 20 places with an id, name, kind, distance in miles from the person's saved address, whether it is open right now and when it closes, rating, price, own_site when the restaurant has a site of its own, and already_shown when you have shown it earlier in this conversation. Searches near the saved address unless you pass area.",
   input_schema: {
     type: "object",
     properties: {
@@ -147,7 +149,7 @@ const FIND_PLACES_TOOL: Anthropic.Tool = {
 const SHOW_PLACES_TOOL: Anthropic.Tool = {
   name: "show_places",
   description:
-    "Show places from find_places as cards (a numbered list by text). Each card shows the place's name, distance, whether it's open, and links, taken from the listing. Call it at most once, after one short line of text, and end your turn with it.",
+    "Show places from find_places as cards (a numbered list by text). Each card shows the place's name, distance, whether it's open, and links, taken from the listing. Call it at most once, after your one or two sentences of recommendation, and end your turn with it.",
   input_schema: {
     type: "object",
     properties: {
@@ -259,11 +261,22 @@ export function readWeb(blocks: Anthropic.ContentBlock[]): { cited: Source[]; fo
   return { cited, found };
 }
 
-/** A place found this turn, with its distance from the saved address. */
-export type FoundPlace = Place & { miles?: number };
+/** A place found this turn, with its distance from the saved address, and whether an earlier answer already showed it. */
+export type FoundPlace = Place & { miles?: number; shown?: boolean };
+
+/** Google's ids of the places already shown on cards in this conversation, so "see more" brings new ones. */
+export function shownPlaces(thread: ChatMessage[]): Set<string> {
+  return new Set(thread.flatMap((m) => (m.choices ?? []).flatMap((c) => (c.place ? [c.place.id] : []))));
+}
+
+/** "9:00 PM" in the person's time zone. Without a time zone the hour would be a guess, so there is none. */
+function closingTime(iso: string | null, timeZone: string | undefined): string | undefined {
+  if (!iso || !timeZone) return undefined;
+  return new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit", timeZone }).format(new Date(iso));
+}
 
 /** What Claude is told about the places a search found, keyed by a short id it can quote back. */
-export function describePlaces(found: ReadonlyMap<string, FoundPlace>, ids: string[]): string {
+export function describePlaces(found: ReadonlyMap<string, FoundPlace>, ids: string[], timeZone?: string): string {
   const rows = ids.map((id) => {
     const p = found.get(id)!;
     return {
@@ -272,11 +285,13 @@ export function describePlaces(found: ReadonlyMap<string, FoundPlace>, ids: stri
       kind: p.kind || undefined,
       miles: p.miles,
       open_now: p.open ?? "unknown",
+      closes: closingTime(p.closes, timeZone),
       rating: p.rating ?? undefined,
       ratings: p.ratings ?? undefined,
       price: p.price ?? undefined,
       own_site: isOwnSite(p.website) || undefined,
       address: p.address || undefined,
+      already_shown: p.shown || undefined,
     };
   });
   return rows.length ? JSON.stringify(rows) : "No places matched. Tell the person plainly and offer to widen the search.";
@@ -349,6 +364,7 @@ export async function reply(thread: ChatMessage[], guest: Guest, channel: Channe
   const messages = toClaudeMessages(thread);
   const blocks: Anthropic.ContentBlock[] = [];
   const found = new Map<string, FoundPlace>();
+  const shown = shownPlaces(thread);
   let placeSearches = 0;
   let text = "";
   // A search or a card sits between two stretches of prose: start a new paragraph after it.
@@ -374,10 +390,10 @@ export async function reply(thread: ChatMessage[], guest: Guest, channel: Channe
       const places = await searchPlaces({ query, area: area || undefined, near: guest.near, openNow: args.open_now === true });
       const ids = places.map((place) => {
         const id = `p${found.size + 1}`;
-        found.set(id, { ...place, ...(guest.near && place.point ? { miles: milesBetween(guest.near, place.point) } : {}) });
+        found.set(id, { ...place, ...(guest.near && place.point ? { miles: milesBetween(guest.near, place.point) } : {}), ...(shown.has(place.id) ? { shown: true } : {}) });
         return id;
       });
-      return { content: describePlaces(found, ids) };
+      return { content: describePlaces(found, ids, guest.timeZone) };
     } catch (error) {
       if (!(error instanceof PlacesError)) throw error;
       return { content: "The places search isn't responding. Tell the person plainly that you couldn't look it up just now.", is_error: true };
