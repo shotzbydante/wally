@@ -119,6 +119,15 @@ export function AskWally({
     };
   }, [busy, refresh]);
 
+  // And every few seconds while the page is showing, so a text sent from the phone appears here without a refresh.
+  useEffect(() => {
+    if (busy) return;
+    const timer = setInterval(() => {
+      if (document.visibilityState === "visible") void refresh();
+    }, 6000);
+    return () => clearInterval(timer);
+  }, [busy, refresh]);
+
   // Follow the conversation down the page unless the person has scrolled up to read.
   const follow = useRef(true);
   useEffect(() => {

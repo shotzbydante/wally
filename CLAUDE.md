@@ -11,7 +11,7 @@ Read `docs/product-brief.md` before any product or architecture work. It condens
 - `docs/` — product brief and decisions.
 - `supabase/migrations` — the database schema, as SQL. `supabase/migrations.test.ts` runs it in an in-process Postgres (PGlite).
 
-Planned, not yet built: channel gateway (iMessage bridge, SMS), memory service, payments service, human ops console. The conversation orchestrator exists in its first form: see "Ask Wally and the agent".
+Planned, not yet built: memory service, payments service, human ops console. The channel gateway exists in its first form: see "Texting Wally". The conversation orchestrator exists in its first form: see "Ask Wally and the agent".
 
 ## Commands
 
@@ -68,7 +68,7 @@ These come from the PRD and exist because of real failures at competitors.
 ## Accounts and the database
 
 - Accounts live in Supabase, used as plain Postgres. Wally keeps its own sign-in; Supabase Auth is not used. Needs `SUPABASE_URL` and `SUPABASE_SECRET_KEY` (`SUPABASE_SERVICE_ROLE_KEY` also works).
-- The server reaches the database only through the SQL functions in `supabase/migrations` (`wally_sign_in`, `wally_account`, `wally_set_name`, `wally_set_address`, `wally_delete_account`, `wally_use_link`, and the `wally_chat_*` and `wally_messages` functions), called over the project's REST endpoint by `src/lib/server/db.ts`. `src/lib/server/accounts.ts` and `src/lib/server/conversation.ts` are the only callers. The secret key must never reach the browser.
+- The server reaches the database only through the SQL functions in `supabase/migrations` (`wally_sign_in`, `wally_account`, `wally_set_name`, `wally_set_address`, `wally_delete_account`, `wally_use_link`, and the `wally_chat_*`, `wally_text_*` and `wally_messages` functions), called over the project's REST endpoint by `src/lib/server/db.ts`. `src/lib/server/accounts.ts` and `src/lib/server/conversation.ts` are the only callers. The secret key must never reach the browser.
 - Tables have row level security on with no policies, and the functions are granted to `service_role` only, so the publishable key can do nothing. Keep that for every new table and function, and add a test for it.
 - Schema changes are new files in `supabase/migrations`, applied by hand in the Supabase SQL editor. Never edit a migration that has been applied.
 - The session cookie holds only the account id. A sign-in is plain by default: it returns the account that owns the email or phone and ignores whoever was signed in before. Only the account page's Add/Change/Connect links (`?link=1`) attach an email, phone or Google to the signed-in account, and that can fold another account into it. When tables start referencing accounts, `wally_sign_in` has to move those rows in the fold.
@@ -92,6 +92,18 @@ These come from the PRD and exist because of real failures at competitors.
 - Without `GOOGLE_MAPS_API_KEY`, Wally falls back to Claude's built-in `web_search` tool to find places (up to three searches a message, each billed by Anthropic), and must ask for the person's area first. With Places on, the web search tool is not offered at all, so review and listing sites never appear beside place cards. A link on a web option card is kept only if it is https and on a site the search returned (`readChoices`). Pages he cites are shown under the answer, which Anthropic's terms require when showing search-backed output to people.
 - Messages are plain text, no markdown, so the same words work in a text message. Sources ride inside the text as a closing "Sources:" block (`withSources` / `splitSources` in `src/lib/chat.ts`); the page lifts them out and shows them as links.
 - Open item: rule 9. People may mention allergies in conversation, and those messages are stored with the rest of the thread. A separately consented store is still to build before Wally remembers dietary needs.
+
+## Texting Wally
+
+- `src/lib/server/texting.ts` is the channel gateway. A text arrives at `/api/text/sendblue` (iMessage, through Sendblue) or `/api/text/twilio` (plain SMS); the route checks it really came from the provider, answers the provider at once, and does the work in `after()`. `handleInbound` then runs the same turn as the website: `wally_text_begin`, `reply(..., "text")`, `wally_chat_reply`, and sends `asPlainText` of the answer back through the provider the text came in by.
+- A text is matched to an account by the verified phone number on it (`wally_text_begin`). A number with no account gets one fixed line pointing at `/join`, and nothing is stored. Wally never texts first (rule 10): every outbound text is a reply.
+- The first text in a thread gets a fixed hello that says he is an AI, then his contact card (`/wally.vcf`, built in `src/app/wally.vcf/route.ts` with his photo from `src/lib/wally-photo.ts`).
+- STOP, START and HELP are handled before anything else (`keywordOf`), only when they are the whole message. `accounts.text_stopped` silences him until START. Twilio answers those words itself, so Wally doesn't answer them again there.
+- Deliveries carry the provider's message id (`messages.external_id`, unique), so a retried webhook is dropped as a duplicate.
+- Twilio webhooks are checked by signature (`twilioSignatureValid`; needs `APP_URL` to be the public origin). Sendblue webhooks are checked by a secret we choose, carried in the webhook address (`?key=`).
+- The website polls `GET /api/chat` every six seconds while visible, so texts show up there without a refresh. Web messages are not pushed to the phone; the phone sees them as context the next time the person texts.
+- Not built yet: the three-second debounce for several texts in a row, photos, group threads, per-line send limits, and a time zone for texters (so closing times aren't quoted by text).
+- Needs `SENDBLUE_API_KEY_ID`, `SENDBLUE_API_SECRET_KEY`, `SENDBLUE_FROM_NUMBER`, `SENDBLUE_WEBHOOK_SECRET` and/or `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_MESSAGING_SERVICE_SID` or `TWILIO_FROM_NUMBER`; plus `NEXT_PUBLIC_WALLY_NUMBER` for the links and the card.
 
 ## When a page breaks
 

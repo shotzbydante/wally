@@ -188,6 +188,31 @@ describe("conversation", () => {
     expect(JSON.stringify(await thread(a.id))).not.toContain("account_id");
   });
 
+  it("takes a text into the same thread, by the phone it came from", async () => {
+    const textBegin = (phone: string, content: string, external: string | null, limit = 100) =>
+      one<{ status: string; first?: boolean; account?: { id: string }; messages?: Message[] }>("select public.wally_text_begin($1, $2, $3, $4, 40) as v", [phone, content, external, limit]);
+    const a = await signIn({ phone: "3105550142", name: "Ana" });
+    await begin(a.id, "From the website");
+    expect(await textBegin("2125550000", "hi", "m0")).toEqual({ status: "unknown" });
+
+    const first = await textBegin("3105550142", "From my phone", "m1");
+    expect(first).toMatchObject({ status: "ok", first: true, account: { id: a.id } });
+    expect(first.messages!.map((m) => [m.channel, m.content])).toEqual([["web", "From the website"], ["text", "From my phone"]]);
+    expect(JSON.stringify(first.messages)).not.toContain("external_id");
+    // The provider delivering the same message again changes nothing.
+    expect(await textBegin("3105550142", "From my phone", "m1")).toEqual({ status: "duplicate" });
+    expect(await textBegin("3105550142", "Again", "m2")).toMatchObject({ status: "ok", first: false });
+    expect(await textBegin("3105550142", "Too many", "m3", 3)).toEqual({ status: "limited" });
+
+    // STOP silences Wally until START.
+    expect(await one<boolean>("select public.wally_text_stop($1, true) as v", ["3105550142"])).toBe(true);
+    expect(await textBegin("3105550142", "Hello?", "m4")).toEqual({ status: "stopped" });
+    await one<boolean>("select public.wally_text_stop($1, false) as v", ["3105550142"]);
+    expect(await textBegin("3105550142", "Back", "m5")).toMatchObject({ status: "ok" });
+    expect(await one<boolean>("select public.wally_text_stop($1, true) as v", ["2125550000"])).toBe(false);
+    expect(await thread(a.id)).toHaveLength(4);
+  });
+
   it("hands Wally only the most recent messages", async () => {
     const a = await signIn({ email: "a@example.com" });
     for (const text of ["one", "two", "three"]) await begin(a.id, text);
@@ -281,6 +306,8 @@ describe("access", () => {
     await expect(db.query("select public.wally_messages(gen_random_uuid(), 10)")).rejects.toThrow(/permission denied/);
     await expect(db.query("select public.wally_chat_begin(gen_random_uuid(), 'web', 'hi', 100, 40)")).rejects.toThrow(/permission denied/);
     await expect(db.query("select public.wally_clear_messages(gen_random_uuid())")).rejects.toThrow(/permission denied/);
+    await expect(db.query("select public.wally_text_begin('3105550142', 'hi', null, 100, 40)")).rejects.toThrow(/permission denied/);
+    await expect(db.query("select public.wally_text_stop('3105550142', true)")).rejects.toThrow(/permission denied/);
     await expect(db.query("select * from public.wally_set_address(gen_random_uuid(), 'x', 1, 1)")).rejects.toThrow(/permission denied/);
     await expect(
       db.query("select * from public.wally_sign_in(null, 'x@example.com', false, null, null, null, null, false)"),
