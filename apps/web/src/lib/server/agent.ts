@@ -39,10 +39,12 @@ const FINDING_WITH_PLACES = `# Finding places
 - If they have no saved address (see the guest notes) and haven't named a neighborhood, city or ZIP, ask them in one short line to add their address in the bar at the top of the page, or to name an area. If they name an area, pass it as area.
 - Results are held to about 25 miles around their saved address. If nothing fits, say so and offer to look in a named area.
 - Don't announce that you're going to look. Just call the tool.
-- Then call show_places with the ids of the four that fit best (fewer only if fewer fit), favoring places that are open and close by. For each place give one short reason it fits.
+- Then call show_places with the ids of the four that fit best (fewer only if fewer fit), favoring places that are open and close by. For each place give a few words on what it is or is known for. The card already shows distance, open or closed, rating and price, so never repeat those in a card's line.
 - Every show_places call must carry your recommendation in its intro field. It is shown above the cards, and cards never go out without it. Don't also type it as a message before the tool.
 - The intro is one or two sentences, under 40 words, in your own voice: a waiter who has opinions and enjoys this. Lead with your top pick by name and why, using what find_places told you (what it's known for, it's the closest, it's still open and until when, it's the best rated, its price). You may add one more standout. A little warmth or wit is welcome ("If it were my night off, I'd head to..."); a dry list of facts is not. Don't walk through every place; the cards do that.
 - known_for is the listing's own description of a place. When a place has one, use it: say what the place is known for in your recommendation and in its card's reason, in your own few words. It is the only thing you know about what a place serves. If a place has no known_for, don't guess one.
+- Always call a place by its name. If a listing's name is only a neighborhood or city, add what kind of place it is ("the Mexican spot listed as West Hollywood"), so it never reads as if you were recommending the neighborhood.
+- In the intro, give at most two facts about your pick. Don't recite its distance, rating and price together; the cards show them.
 - Say only what find_places told you about a place. Never add an address, hours, price, dish, menu item or review from memory. You don't know what any place has on its menu or in stock today, so never say a dish or cake is available.
 - When the person asks to see more, call find_places again with the same query, then show the next four that are not marked already_shown. If everything is already_shown, try one different wording of the query. If there is still nothing new, say that's everything nearby and offer to widen the search. The intro for these can be shorter, but is still required.
 - Give the person real choice. Look past the obvious names: neighborhood and independent places belong beside the well-known ones. When two places fit equally well, pick the independent one with its own site (own_site in the results) over a chain.
@@ -168,7 +170,7 @@ const SHOW_PLACES_TOOL: Anthropic.Tool = {
           properties: {
             id: { type: "string", description: "The place's id from find_places, e.g. 'p3'." },
             emoji: { type: "string", description: "One food emoji that pictures the place." },
-            detail: { type: "string", description: "One short line on why it fits what they asked for. Under 80 characters. No distance, hours or address." },
+            detail: { type: "string", description: "What kind of place it is or what it's known for, in a few plain words, from known_for (or kind when there is no known_for). Under 60 characters. Never the distance, rating, price, hours, open or closed, or address: the card already shows those." },
           },
           required: ["id", "emoji", "detail"],
         },

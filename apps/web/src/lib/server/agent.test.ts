@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { asPlainText, asTexts, isOwnSite, tidyLink, webNudgeDue, splitSources, withSources, type ChatMessage } from "@/lib/chat";
+import { asPlainText, asTexts, textDeliveryLinks, isOwnSite, tidyLink, webNudgeDue, splitSources, withSources, type ChatMessage } from "@/lib/chat";
 import { describePlaces, readChoices, readWeb, toClaudeMessages, type FoundPlace } from "./agent";
 
 const message = (id: number, role: ChatMessage["role"], content: string, choices: ChatMessage["choices"] = null): ChatMessage => ({
@@ -135,12 +135,16 @@ describe("asTexts", () => {
   const cookies = { emoji: "🍪", title: "Insomnia Cookies", detail: "Open late, warm cookies", reply: "x", place: { id: "a", miles: 2.8, open: true, rating: 4.5, price: "$", website: "https://insomniacookies.com/", maps: "https://maps.google.com/?cid=1" } };
   const closed = { emoji: "🥛", title: "DeLuscious", detail: "", reply: "x", place: { id: "b", miles: 1.1, open: false, maps: "https://maps.google.com/?cid=2" } };
   it("sends his words and the cards as separate texts, a small card per place", () => {
-    expect(asTexts({ content: "Insomnia is my pick.", choices: [cookies, closed] })).toEqual([
+    expect(asTexts({ content: "Insomnia is my pick.", choices: [cookies, closed] }, "https://wallywaiter.com")).toEqual([
       "Insomnia is my pick.",
-      "1. 🍪 Insomnia Cookies\nOpen now · 2.8 mi · ★ 4.5 · $\nOpen late, warm cookies\ninsomniacookies.com\n\n2. 🥛 DeLuscious\nClosed · 1.1 mi\nhttps://maps.google.com/?cid=2",
+      "1. 🍪 Insomnia Cookies\nOpen now · 2.8 mi · ★ 4.5 · $\nOpen late, warm cookies\ninsomniacookies.com\n\n2. 🥛 DeLuscious\nClosed · 1.1 mi\nDoorDash: wallywaiter.com/go/doordash/deluscious\nUber Eats: wallywaiter.com/go/ubereats/deluscious",
     ]);
-    expect(asTexts({ content: "Just words.", choices: null })).toEqual(["Just words."]);
-    expect(asTexts({ content: "Two ideas.", choices: [ramen, tacos] })).toEqual(["Two ideas.", "1. 🍜 Ramen\nRich and warm\n\n2. 🌮 Tacos"]);
+    expect(asTexts({ content: "Just words.", choices: null }, "https://wallywaiter.com")).toEqual(["Just words."]);
+    expect(asTexts({ content: "Two ideas.", choices: [ramen, tacos] }, "https://wallywaiter.com")).toEqual(["Two ideas.", "1. 🍜 Ramen\nRich and warm\n\n2. 🌮 Tacos"]);
+  });
+  it("writes delivery links a text can carry", () => {
+    expect(textDeliveryLinks("Lei’d Cookies & Café", "https://wallywaiter.com").map((l) => l.url)).toEqual(["wallywaiter.com/go/doordash/leid-cookies-cafe", "wallywaiter.com/go/ubereats/leid-cookies-cafe"]);
+    expect(textDeliveryLinks("麺", "https://wallywaiter.com")).toEqual([]);
   });
   it("shortens a plain link and leaves the rest alone", () => {
     expect(tidyLink("http://www.delusciouscookies.com/")).toBe("delusciouscookies.com");

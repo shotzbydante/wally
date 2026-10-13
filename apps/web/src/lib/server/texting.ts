@@ -262,7 +262,7 @@ export async function handleInbound(inbound: Inbound, origin: string): Promise<v
       const saved = await saveReply(account.id, "text", answer.content, answer.choices);
       if (saved) {
         // One bubble for his words, one for the cards, and now and then a pointer to the website.
-        const texts = [...asTexts(answer), ...(begun.first || webNudgeDue(begun.messages) ? [NOTICE.web(origin)] : [])];
+        const texts = [...asTexts(answer, origin), ...(begun.first || webNudgeDue(begun.messages) ? [NOTICE.web(origin)] : [])];
         for (const part of texts) if (!(await sendText(provider, from, part))) break;
       }
     } catch (error) {

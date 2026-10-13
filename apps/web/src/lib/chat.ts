@@ -94,8 +94,12 @@ export function tidyLink(url: string): string {
  *
  * Numbers stay, because a person may answer with one. `asPlainText` remains
  * the record Wally reads back; this is only how it looks on a phone.
+ *
+ * A place's link is its website. Without one, the card offers the delivery
+ * apps instead, as short links on `origin` (see `textDeliveryLinks`). A
+ * Google Maps link is never sent.
  */
-export function asTexts(message: Pick<ChatMessage, "content" | "choices">): string[] {
+export function asTexts(message: Pick<ChatMessage, "content" | "choices">, origin: string): string[] {
   const cards = (message.choices ?? []).map((c, i) => {
     const p = c.place;
     const facts = [
@@ -105,8 +109,9 @@ export function asTexts(message: Pick<ChatMessage, "content" | "choices">): stri
       p?.rating !== undefined && `★ ${p.rating.toFixed(1)}`,
       p?.price,
     ].filter(Boolean);
-    const link = p?.website ?? p?.maps ?? c.url;
-    return [`${i + 1}. ${c.emoji ? `${c.emoji} ` : ""}${c.title}`, facts.join(" · "), c.detail, link && tidyLink(link)].filter(Boolean).join("\n");
+    const site = p ? p.website : c.url;
+    const links = site ? [tidyLink(site)] : p ? textDeliveryLinks(c.title, origin).map((l) => `${l.app}: ${l.url}`) : [];
+    return [`${i + 1}. ${c.emoji ? `${c.emoji} ` : ""}${c.title}`, facts.join(" · "), c.detail, ...links].filter(Boolean).join("\n");
   });
   return [message.content.trim(), cards.join("\n\n")].filter(Boolean);
 }
@@ -174,6 +179,17 @@ export function deliveryLinks(name: string): { app: string; url: string }[] {
     { app: "DoorDash", url: `https://www.doordash.com/search/store/${q}/` },
     { app: "Uber Eats", url: `https://www.ubereats.com/search?q=${q}` },
   ];
+}
+
+/**
+ * The same delivery searches as short links for a text, served by
+ * `/go/[app]/[slug]`: "wallywaiter.com/go/doordash/tacos-el-parrillon".
+ * Empty when the name has nothing a link can carry.
+ */
+export function textDeliveryLinks(name: string, origin: string): { app: string; url: string }[] {
+  const slug = name.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/['\u2019]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 60);
+  if (!slug) return [];
+  return deliveryLinks(name).map((l) => ({ app: l.app, url: tidyLink(`${origin}/go/${l.app.toLowerCase().replace(/\s/g, "")}/${slug}`) }));
 }
 
 /**
