@@ -164,8 +164,27 @@ export async function suggestAddresses(typed: string, options: { near?: Point | 
     .map((p) => ({ text: tidy(p!.text!.text), main: tidy(p!.structuredFormat?.mainText?.text) || tidy(p!.text!.text), secondary: tidy(p!.structuredFormat?.secondaryText?.text) }));
 }
 
-/** How far around the saved address to lean the search, in metres. */
-const NEARBY_RADIUS = 8000;
+/** How far from the saved address a search may reach, in miles each way. */
+const NEARBY_MILES = 25;
+
+/**
+ * The box around a point that a nearby search is held to. A lean toward the
+ * point isn't enough: Google will still answer with a bigger city's places.
+ */
+function boxAround(point: Point) {
+  const lat = NEARBY_MILES / 69;
+  const lng = lat / Math.max(Math.cos((point.lat * Math.PI) / 180), 0.2);
+  const round = (n: number) => Math.round(n * 1e4) / 1e4;
+  return {
+    rectangle: {
+      low: { latitude: round(Math.max(point.lat - lat, -90)), longitude: round(Math.max(point.lng - lng, -180)) },
+      high: { latitude: round(Math.min(point.lat + lat, 90)), longitude: round(Math.min(point.lng + lng, 180)) },
+    },
+  };
+}
+
+/** "pizza near me" is just "pizza": where "me" is comes from the saved address, not the words. */
+const withoutNearMe = (query: string) => query.replace(/\s*\b(near|around|close to|by)\s+(me|here|my (location|address|house|home|place))\b/gi, "").trim() || query;
 
 /** Places asked for in one search. Google allows up to 20, which is five screens of four. */
 const PAGE_SIZE = 20;
@@ -173,7 +192,7 @@ const PAGE_SIZE = 20;
 export interface PlaceSearch {
   /** What to look for: "dessert", "ramen", "late night tacos". */
   query: string;
-  /** Lean results toward here. */
+  /** Search only around here. */
   near?: Point | null;
   /** A neighbourhood, city or ZIP the person named, searched instead of `near`. */
   area?: string;
@@ -185,10 +204,10 @@ export async function searchPlaces(search: PlaceSearch): Promise<Place[]> {
   const area = search.area?.trim();
   const raw = await searchText(
     {
-      textQuery: area ? `${search.query} near ${area}` : search.query,
+      textQuery: area ? `${withoutNearMe(search.query)} near ${area}` : withoutNearMe(search.query),
       pageSize: PAGE_SIZE,
       ...(search.openNow ? { openNow: true } : {}),
-      ...(!area && search.near ? { locationBias: { circle: { center: { latitude: search.near.lat, longitude: search.near.lng }, radius: NEARBY_RADIUS } } } : {}),
+      ...(!area && search.near ? { locationRestriction: boxAround(search.near) } : {}),
     },
     ["id", "displayName", "shortFormattedAddress", "formattedAddress", "primaryTypeDisplayName", "editorialSummary", "location", "currentOpeningHours", "rating", "userRatingCount", "priceLevel", "websiteUri", "googleMapsUri", "businessStatus"],
   );

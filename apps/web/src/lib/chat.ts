@@ -134,5 +134,19 @@ export function isOwnSite(url: string | undefined | null): boolean {
   return Boolean(host) && !NOT_THEIR_OWN.some((site) => host === site || host.endsWith(`.${site}`));
 }
 
+/** What the address bar holds when the person chose to search near where their device is, not a typed address. */
+export const CURRENT_LOCATION = "My current location";
+
+/**
+ * The city and state of a saved address ("Fresno, CA"), which is as much of it as Wally is told.
+ * Undefined when the address doesn't read as street, city, state.
+ */
+export function cityOf(address: string | null | undefined): string | undefined {
+  const parts = (address ?? "").replace(/,\s*(USA|United States)$/i, "").split(",").map((part) => part.trim()).filter(Boolean);
+  if (parts.length < 3) return undefined;
+  const state = parts[parts.length - 1]!.replace(/\s*\d{5}(-\d{4})?$/, "");
+  return [parts[parts.length - 2], state].filter(Boolean).join(", ").slice(0, 60);
+}
+
 /** How long after an answer its "open" and "closed" badges are still worth showing. */
 export const OPEN_BADGE_MINUTES = 30;

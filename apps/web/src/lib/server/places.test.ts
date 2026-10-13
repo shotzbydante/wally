@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { deliveryLinks } from "@/lib/chat";
+import { cityOf, deliveryLinks } from "@/lib/chat";
 import { describePlaces, placeChoices, shownPlaces, type FoundPlace } from "./agent";
 import { findAddress, milesBetween, searchPlaces, suggestAddresses } from "./places";
 
@@ -47,11 +47,12 @@ describe("searchPlaces", () => {
 
   it("leans toward the saved address and tidies what comes back", async () => {
     const calls = google([raw, { ...raw, id: "gone", businessStatus: "CLOSED_PERMANENTLY" }, { id: "bare", displayName: { text: "Bare" }, websiteUri: "javascript:alert(1)" }]);
-    expect(await searchPlaces({ query: "dessert", near: home, openNow: true })).toEqual([
+    expect(await searchPlaces({ query: "dessert near me", near: home, openNow: true })).toEqual([
       { id: "abc", name: "Milk Bar", address: "7150 Melrose Ave", kind: "Dessert shop", summary: "Playful bakery known for cereal milk soft serve.", point: { lat: 34.08, lng: -118.34 }, open: true, closes: "2026-10-13T04:00:00Z", rating: 4.5, ratings: 812, price: "$$", website: "https://milkbarstore.com/", maps: "https://maps.google.com/?cid=1" },
       { id: "bare", name: "Bare", address: "", kind: "", summary: null, point: null, open: null, closes: null, rating: null, ratings: null, price: null, website: null, maps: "https://www.google.com/maps/place/?q=place_id:bare" },
     ]);
-    expect(calls[0]!.body).toEqual({ textQuery: "dessert", pageSize: 20, openNow: true, locationBias: { circle: { center: { latitude: 34.0639, longitude: -118.3592 }, radius: 8000 } } });
+    // Held to a box about 25 miles each way, so a bigger city far away can't answer.
+    expect(calls[0]!.body).toEqual({ textQuery: "dessert", pageSize: 20, openNow: true, locationRestriction: { rectangle: { low: { latitude: 33.7016, longitude: -118.7966 }, high: { latitude: 34.4262, longitude: -117.9218 } } } });
   });
   it("searches a named area instead of the saved address", async () => {
     const calls = google([]);
@@ -61,6 +62,15 @@ describe("searchPlaces", () => {
   it("throws when Google refuses", async () => {
     google([], 403);
     await expect(searchPlaces({ query: "dessert" })).rejects.toThrow("403");
+  });
+});
+
+describe("cityOf", () => {
+  it("keeps only the city and state of an address", () => {
+    expect(cityOf("10764 N Backer Ave, Fresno, CA 93730, USA")).toBe("Fresno, CA");
+    expect(cityOf("215 S Mansfield Ave, Los Angeles, CA 90036")).toBe("Los Angeles, CA");
+    expect(cityOf("My current location")).toBeUndefined();
+    expect(cityOf(null)).toBeUndefined();
   });
 });
 

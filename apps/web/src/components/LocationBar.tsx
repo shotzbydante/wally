@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, type FormEvent } from "react";
+import { CURRENT_LOCATION } from "@/lib/chat";
 
 interface Suggestion {
   text: string;
@@ -16,6 +17,8 @@ const problems: Record<string, string> = {
   signed_out: "You’ve been signed out. Sign in again to save your address.",
   invalid_input: "Enter a street address, like 123 Main St, Los Angeles.",
   network: "Couldn’t reach Wally. Check your connection and try again.",
+  location_blocked: "Location is turned off for this site. Allow it in your browser’s settings, or type an address.",
+  location_failed: "Your device couldn’t find where you are. Try again, or type an address.",
 };
 
 /** "5905 Wilshire Blvd, Los Angeles, CA 90036, USA" reads better without the country. */
@@ -42,6 +45,8 @@ export function LocationBar({ saved, onChange }: { saved: string | null; onChang
   const [error, setError] = useState<string | null>(null);
   const asking = !saved || editing;
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
+  /** The dropdown shows once the box has been tapped, not while it sits unused. */
+  const [open, setOpen] = useState(false);
   const field = useRef<HTMLInputElement>(null);
   /** One id per stretch of typing, which Google uses to group the lookups. */
   const typing = useRef("");
@@ -71,18 +76,19 @@ export function LocationBar({ saved, onChange }: { saved: string | null; onChang
   };
   const close = () => {
     setEditing(false);
+    setOpen(false);
     setDraft("");
     setSuggestions([]);
     typing.current = "";
   };
 
-  const request = async (method: "POST" | "DELETE", address?: string) => {
+  const request = async (method: "POST" | "DELETE", address?: string, here?: { lat: number; lng: number }) => {
     setBusy(true);
     setError(null);
     try {
       const res = await fetch("/api/account/address", {
         method,
-        ...(address ? { headers: { "Content-Type": "application/json" }, body: JSON.stringify({ address }) } : {}),
+        ...(address || here ? { headers: { "Content-Type": "application/json" }, body: JSON.stringify(here ? { here } : { address }) } : {}),
       });
       const data = (await res.json().catch(() => ({}))) as { address?: string; error?: string };
       if (!res.ok) setError(problems[data.error ?? ""] ?? problems.unavailable!);
@@ -95,6 +101,38 @@ export function LocationBar({ saved, onChange }: { saved: string | null; onChang
     }
     setBusy(false);
   };
+
+  /** Asks the device where it is. `quiet` is the check on arrival, which changes nothing if it can't. */
+  const locate = (quiet = false) => {
+    if (!("geolocation" in navigator)) return quiet ? undefined : setError(problems.location_failed!);
+    if (!quiet) {
+      setBusy(true);
+      setError(null);
+    }
+    navigator.geolocation.getCurrentPosition(
+      (at) => void request("POST", undefined, { lat: at.coords.latitude, lng: at.coords.longitude }),
+      (problem) => {
+        if (quiet) return;
+        setBusy(false);
+        setError(problem.code === problem.PERMISSION_DENIED ? problems.location_blocked! : problems.location_failed!);
+      },
+      { maximumAge: 60_000, timeout: 10_000 },
+    );
+  };
+  // "My current location" is where the device was when it was chosen. Look again on arrival, so it keeps up.
+  const following = saved === CURRENT_LOCATION;
+  const looked = useRef(false);
+  useEffect(() => {
+    if (!following || looked.current) return;
+    looked.current = true;
+    navigator.permissions
+      ?.query({ name: "geolocation" })
+      .then((permission) => {
+        if (permission.state === "granted") locate(true);
+      })
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once per arrival
+  }, [following]);
 
   const submit = (e: FormEvent) => {
     e.preventDefault();
@@ -120,7 +158,7 @@ export function LocationBar({ saved, onChange }: { saved: string | null; onChang
             <>
               <p className="min-w-0 flex-1 truncate">
                 <span className="text-ink-soft">Near </span>
-                <span className="font-semibold">{tidy(saved)}</span>
+                <span className="font-semibold">{saved === CURRENT_LOCATION ? "my current location" : tidy(saved)}</span>
               </p>
               <button
                 type="button"
@@ -144,6 +182,7 @@ export function LocationBar({ saved, onChange }: { saved: string | null; onChang
               <input
                 id="address"
                 ref={field}
+                onFocus={() => setOpen(true)}
                 value={draft}
                 onChange={(e) => type(e.target.value)}
                 autoComplete="street-address"
@@ -186,8 +225,19 @@ export function LocationBar({ saved, onChange }: { saved: string | null; onChang
             </form>
           )}
         </div>
-        {asking && suggestions.length > 0 && (
+        {asking && open && (
           <div className="card absolute inset-x-5 top-full z-30 -mt-0.5 overflow-hidden rounded-2xl bg-pad ring-1 ring-line sm:inset-x-8">
+            <button type="button" disabled={busy} onClick={() => locate()} className="flex w-full items-center gap-2.5 border-b border-line/70 px-3 py-2 text-left font-semibold text-green-deep hover:bg-mint-wash/60 active:bg-mint-wash disabled:opacity-60">
+              <span className="fill-green flex size-8 shrink-0 items-center justify-center rounded-full text-white">
+                <svg viewBox="0 0 24 24" className="size-4" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <circle cx="12" cy="12" r="3.5" />
+                  <path d="M12 2v4M12 18v4M2 12h4M18 12h4" />
+                </svg>
+              </span>
+              Near my location
+            </button>
+            {suggestions.length > 0 && (
+            <>
             <ul aria-label="Suggested addresses">
               {suggestions.map((s) => (
                 <li key={s.text} className="border-b border-line/70 last:border-b-0">
@@ -216,6 +266,8 @@ export function LocationBar({ saved, onChange }: { saved: string | null; onChang
             <p className="px-3 py-1.5 text-right text-[0.75rem]" style={{ fontFamily: "Roboto, sans-serif", color: "#5E5E5E" }}>
               <span translate="no">Google Maps</span>
             </p>
+            </>
+            )}
           </div>
         )}
         {error && (
