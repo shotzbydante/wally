@@ -8,6 +8,7 @@ import { EraseButton } from "@/components/EraseButton";
 import { NameForm } from "@/components/NameForm";
 import { Notice, noticeAction as primary } from "@/components/Notice";
 import { SignedInHeader } from "@/components/SignedInHeader";
+import { SiteIcon } from "@/components/SiteIcon";
 import { Wally } from "@/components/Wally";
 import { brandLogos } from "@/lib/brand-logos";
 import { delivery, reservations, type FoodService } from "@/lib/connectors";
@@ -263,7 +264,7 @@ function Row({ icon, title, detail, action }: { icon?: ReactNode; title: string;
 function ServiceRow({ service }: { service: FoodService }) {
   return (
     <Row
-      icon={<ServiceMark name={service.name} />}
+      icon={<ServiceMark service={service} />}
       title={service.name}
       detail={service.blurb}
       action={<Soon>Coming soon</Soon>}
@@ -271,10 +272,10 @@ function ServiceRow({ service }: { service: FoodService }) {
   );
 }
 
-/** The service's own mark on a white tile, or its initial where we don't hold the mark. */
-function ServiceMark({ name }: { name: string }) {
-  const logo = brandLogos[name];
-  if (!logo) return <Glyph>{name.charAt(0)}</Glyph>;
+/** The service's own mark on a white tile: our vector copy where we hold one, otherwise the icon its website publishes. */
+function ServiceMark({ service }: { service: FoodService }) {
+  const logo = brandLogos[service.name];
+  if (!logo) return <SiteIcon domain={service.domain} letter={service.name.charAt(0)} />;
   // A pale brand colour can't be read on white, so it becomes the tile and the mark goes dark.
   const [r, g, b] = [1, 3, 5].map((at) => parseInt(logo.hex.slice(at, at + 2), 16));
   const pale = 0.2126 * r! + 0.7152 * g! + 0.0722 * b! > 190;
