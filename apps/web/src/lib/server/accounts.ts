@@ -126,6 +126,18 @@ export async function upgradeSession(res: NextResponse, session: Session, secret
   }
 }
 
+/**
+ * Puts a phone number on an account, once a text from that number has proved
+ * it is theirs. If another account already had the number, it is folded in.
+ * False if the account is gone. Throws DbError if the database can't be reached.
+ */
+export async function linkPhone(accountId: string, phone: string): Promise<boolean> {
+  const [exists] = await rpc<AccountRow[]>("wally_account", { p_id: accountId });
+  if (!exists) return false;
+  const row = await signInRow({ phone }, accountId, false);
+  return row.id === accountId;
+}
+
 export type AccountState =
   | { state: "signed_out" }
   /** `kept` says where the details live, for the privacy note. */

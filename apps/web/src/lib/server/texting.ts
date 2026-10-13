@@ -1,8 +1,10 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { asPlainText } from "@/lib/chat";
+import { linkPhone } from "./accounts";
 import { AgentError, reply } from "./agent";
 import { beginTextTurn, saveReply, setTextStopped, undoTurn } from "./conversation";
 import { DbError } from "./db";
+import { sessionSecret } from "./session";
 
 /**
  * The texting side of Wally: takes a text from a provider, answers it with
@@ -69,6 +71,30 @@ export function keywordOf(text: string): "stop" | "start" | "help" | null {
   if (["STOP", "STOPALL", "UNSUBSCRIBE", "CANCEL", "END", "QUIT"].includes(word)) return "stop";
   if (["START", "UNSTOP"].includes(word)) return "start";
   if (["HELP", "INFO"].includes(word)) return "help";
+  return null;
+}
+
+/**
+ * A code that connects a phone to an account. The account page puts it in a
+ * ready-written text to Wally; when that text arrives, the number it came
+ * from is proven to be the person's, with no verification service needed.
+ * It is the account id plus a signature that changes daily: 32 characters.
+ */
+const day = (now: number) => Math.floor(now / 86_400_000);
+const codeMac = (id: string, on: number, secret: string) => createHmac("sha256", secret).update(`connect:${id}:${on}`).digest("base64url").slice(0, 10);
+
+export function connectCode(accountId: string, secret: string, now = Date.now()): string {
+  return Buffer.from(accountId.replace(/-/g, ""), "hex").toString("base64url") + codeMac(accountId, day(now), secret);
+}
+
+/** The account id a text's connect code names, if the code is genuine and from today or yesterday. */
+export function readConnectCode(text: string, secret: string, now = Date.now()): string | null {
+  for (const [candidate] of text.matchAll(/[A-Za-z0-9_-]{32}/g)) {
+    const hex = Buffer.from(candidate.slice(0, 22), "base64url").toString("hex");
+    if (hex.length !== 32) continue;
+    const id = `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+    for (const on of [day(now), day(now) - 1]) if (sameSecret(candidate.slice(22), codeMac(id, on, secret))) return id;
+  }
   return null;
 }
 
@@ -159,10 +185,12 @@ function showTyping(provider: Provider, to: string): void {
 
 // Fixed wording: these are notices, not conversation (see "Conventions" in CLAUDE.md).
 const NOTICE = {
-  unknown: (origin: string) => `Hi, I'm Wally, an AI waiter. I don't know this number yet. Sign up, or add this number to your account, at ${origin}/join and then text me again.`,
+  unknown: (origin: string) => `Hi, I'm Wally, an AI waiter. I don't know this number yet. Sign in at ${origin}/account and tap Connect by text, or sign up at ${origin}/join.`,
   hello: "Wally here, your AI waiter. Save my contact card so you know it's me. Everything we say here also shows up at wallywaiter.com. Reply STOP to stop texts, HELP for help.",
   stopped: "You won't get any more texts from Wally. Reply START to turn them back on.",
   started: "Texts from Wally are back on. What can I get you?",
+  connected: "You're connected: this number is now on your Wally account, and we share one conversation with the website. Text me what you're hungry for.",
+  notConnected: "That connect code didn't work. Open your account page and tap Connect by text again for a fresh one.",
   help: (origin: string) => `Wally is an AI waiter for food questions and finding places. Manage your account at ${origin}/account. Reply STOP to stop texts.`,
   limited: "You've reached today's message limit, so that one wasn't answered. The limit resets within 24 hours.",
   wordsOnly: "I can only read words for now. Tell me what you're after.",
@@ -191,6 +219,14 @@ export async function handleInbound(inbound: Inbound, origin: string): Promise<v
     }
     if (!text) {
       await sendText(provider, from, NOTICE.wordsOnly);
+      return;
+    }
+
+    // A text carrying a connect code from the account page puts this number on that account.
+    const secret = sessionSecret();
+    const connectTo = secret ? readConnectCode(text, secret) : null;
+    if (connectTo) {
+      await sendText(provider, from, (await linkPhone(connectTo, from)) ? NOTICE.connected : NOTICE.notConnected);
       return;
     }
 

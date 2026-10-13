@@ -12,6 +12,7 @@ import { Wally } from "@/components/Wally";
 import { delivery, reservations, type FoodService } from "@/lib/connectors";
 import { loadAccount } from "@/lib/server/accounts";
 import { SESSION_COOKIE, sessionSecret } from "@/lib/server/session";
+import { connectCode } from "@/lib/server/texting";
 import { firstTextLink, formatUsPhone } from "@/lib/signup";
 
 export const metadata: Metadata = { title: "Your account" };
@@ -59,6 +60,9 @@ async function Account({ searchParams }: { searchParams: Query }) {
   const eraseFailed = (await searchParams).problem === "erase";
 
   const wallyNumber = process.env.NEXT_PUBLIC_WALLY_NUMBER ?? null;
+  // A ready-written text that proves this phone belongs to this account (see connectCode).
+  const secret = sessionSecret();
+  const connectLink = wallyNumber && inDatabase && session.id && secret ? firstTextLink(wallyNumber, `Hi Wally, connect my phone. Code: ${connectCode(session.id, secret)}`) : null;
 
   return (
     <>
@@ -100,7 +104,7 @@ async function Account({ searchParams }: { searchParams: Query }) {
             icon={<Glyph>📱</Glyph>}
             title="Phone"
             detail={session.phone ? `+1 ${formatUsPhone(session.phone)}` : "Not linked"}
-            action={<Action href="/join?link=1" quiet>{session.phone ? "Change" : "Add"}</Action>}
+            action={connectLink && !session.phone ? <Action href={connectLink}>Connect by text</Action> : <Action href="/join?link=1" quiet>{session.phone ? "Change" : "Add"}</Action>}
           />
           <Row
             icon={<Glyph>@</Glyph>}
