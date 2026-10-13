@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type FormEvent, type KeyboardEvent } from "react";
 import { LocationBar } from "@/components/LocationBar";
 import { Wally } from "@/components/Wally";
+import { WallyFace, type WallyLook } from "@/components/WallyFace";
 import { MAX_MESSAGE_CHARS, OPEN_BADGE_MINUTES, deliveryLinks, hostOf, isOwnSite, splitSources, type ChatEvent, type ChatMessage, type Choice } from "@/lib/chat";
 
 /** What Wally is doing, which drives how he moves and what his bubble says. */
@@ -26,6 +27,11 @@ const problems: Record<string, string> = {
   network: "Couldn’t reach Wally. Check your connection and try again.",
   clear_failed: "The conversation wasn’t erased. Wally’s records didn’t respond. Try again in a moment.",
 };
+
+/** How his face passes the time between questions. */
+const idleLooks: WallyLook[] = ["smile", "right", "smile", "wink", "left", "smile"];
+/** What he says once he has answered. Which one depends on where the conversation is. */
+const idleLines = ["At your service.", "What else can I get you?", "Ready when you are."];
 
 const greeting = (name: string) => `Hi${name ? ` ${name}` : ""}, I’m Wally, your personal waiter. What can I serve up for you today?`;
 
@@ -60,9 +66,23 @@ export function AskWally({
   const [confirmClear, setConfirmClear] = useState(false);
   /** Changes each time an answer lands, to replay Wally's hop. */
   const [hops, setHops] = useState(0);
+  /** Ticks every few seconds, so his face doesn't hold one expression. */
+  const [beat, setBeat] = useState(0);
+  /** True for a moment after an answer lands. */
+  const [cheer, setCheer] = useState(false);
   const input = useRef<HTMLTextAreaElement>(null);
   const busy = pending !== null;
   const empty = messages.length === 0 && !busy;
+
+  useEffect(() => {
+    const timer = setInterval(() => setBeat((n) => n + 1), 4200);
+    return () => clearInterval(timer);
+  }, []);
+  useEffect(() => {
+    if (!cheer) return;
+    const timer = setTimeout(() => setCheer(false), 2400);
+    return () => clearTimeout(timer);
+  }, [cheer]);
 
   // Open on the latest message.
   useEffect(() => toBottom(false), []);
@@ -158,6 +178,7 @@ export function AskWally({
         setPending(null);
         setMood("idle");
         setHops((n) => n + 1);
+        setCheer(true);
       } else {
         finished = true;
         fail(event.error, text);
@@ -228,7 +249,8 @@ export function AskWally({
           ? hello
           : mood === "speaking"
             ? "Here’s my thinking."
-            : "At your service.";
+            : idleLines[messages.length % idleLines.length]!;
+  const look: WallyLook = !ready || mood === "sorry" ? "sorry" : mood === "thinking" ? "thinking" : mood === "speaking" ? "talking" : cheer ? "delight" : idleLooks[beat % idleLooks.length]!;
   const lastId = messages[messages.length - 1]?.id;
 
   return (
@@ -236,10 +258,10 @@ export function AskWally({
     {places && <LocationBar saved={address} onChange={setAddress} />}
     <main className="mx-auto flex w-full max-w-[1080px] flex-1 flex-col px-5 sm:px-8 min-[900px]:flex-row min-[900px]:gap-12">
       {/* Wally: beside the conversation on wide screens, above it on narrow ones.
-          A sticky box is its own stacking group, so on wide screens it must carry Wally's blend (see globals.css). */}
+          This box is its own stacking group, so wherever the full render shows it must carry Wally's blend (see globals.css). */}
       <aside
-        className={`z-10 min-[900px]:mix-blend-darken min-[900px]:sticky min-[900px]:flex ${places ? "min-[900px]:top-[4.5rem] min-[900px]:h-[calc(100dvh-8.75rem)]" : "min-[900px]:top-0 min-[900px]:h-[calc(100dvh-4.25rem)]"} min-[900px]:w-[340px] min-[900px]:shrink-0 min-[900px]:flex-col min-[900px]:justify-center min-[900px]:pb-16 ${
-          empty ? "pt-4" : `sticky ${places ? "top-[4.5rem]" : "top-0"} -mx-5 bg-paper/90 px-5 py-2 backdrop-blur sm:-mx-8 sm:px-8 min-[900px]:mx-0 min-[900px]:bg-transparent min-[900px]:px-0 min-[900px]:backdrop-blur-none`
+        className={`z-10 min-[900px]:mix-blend-darken min-[900px]:sticky min-[900px]:flex ${places ? "min-[900px]:top-[3.5rem] min-[900px]:h-[calc(100dvh-7.75rem)]" : "min-[900px]:top-0 min-[900px]:h-[calc(100dvh-4.25rem)]"} min-[900px]:w-[340px] min-[900px]:shrink-0 min-[900px]:flex-col min-[900px]:justify-center min-[900px]:pb-16 ${
+          empty ? "pt-4 mix-blend-darken" : `fade-under sticky ${places ? "top-[3.5rem]" : "top-0"} -mx-5 bg-paper px-5 py-1 sm:-mx-8 sm:px-8 min-[900px]:mx-0 min-[900px]:bg-transparent min-[900px]:px-0 min-[900px]:after:hidden`
         }`}
       >
         <div className={`flex gap-2 min-[900px]:flex-col min-[900px]:gap-0 ${empty ? "items-end" : "items-center"}`}>
@@ -247,17 +269,35 @@ export function AskWally({
             {line && (
               <p
                 key={line}
-                className={`say bg-ink font-semibold text-white min-[900px]:ml-8 min-[900px]:rounded-[1.6rem] min-[900px]:rounded-bl-md min-[900px]:px-6 min-[900px]:py-5 min-[900px]:text-[1.35rem] min-[900px]:leading-snug ${
+                className={`say fill-ink bg-ink font-semibold text-white min-[900px]:ml-8 min-[900px]:rounded-[1.6rem] min-[900px]:rounded-bl-md min-[900px]:px-6 min-[900px]:py-5 min-[900px]:text-[1.35rem] min-[900px]:leading-snug ${
                   empty
                     ? "rounded-[1.6rem] rounded-bl-md px-5 py-4 text-[1.15rem] leading-snug"
-                    : "inline-block rounded-full px-4 py-1.5 text-[0.95rem]"
+                    : "inline-block rounded-full px-3.5 py-1.5 text-[0.9rem] leading-tight shadow-[0_8px_18px_-12px_rgba(22,26,43,0.7)]"
                 }`}
               >
                 {line}
               </p>
             )}
           </div>
-          <div className={`order-1 shrink-0 min-[900px]:order-2 min-[900px]:-mt-1 min-[900px]:w-full ${empty ? "w-[36%]" : "w-14"}`}>
+          {/* Mid-conversation on a phone there is only room for his face, so that is what shows, and it keeps moving. */}
+          {!empty && (
+            <div className="relative order-1 shrink-0 min-[900px]:hidden">
+              <div key={hops} className={hops ? "face-pop" : undefined}>
+                <div className={`aura ${mood === "thinking" ? "aura-busy" : ""}`}>
+                  <div className={`overflow-hidden rounded-full ${mood === "thinking" ? "face-nod" : ""}`}>
+                    <WallyFace look={look} className="block size-11" />
+                  </div>
+                </div>
+              </div>
+              {cheer && (
+                <>
+                  <span className="spark -top-1 -right-1.5" aria-hidden="true">✦</span>
+                  <span className="spark -bottom-0.5 -left-1.5" style={{ "--d": "160ms" } as CSSProperties} aria-hidden="true">✦</span>
+                </>
+              )}
+            </div>
+          )}
+          <div className={`order-1 shrink-0 min-[900px]:order-2 min-[900px]:-mt-1 min-[900px]:w-full ${empty ? "w-[36%]" : "hidden min-[900px]:block"}`}>
             <div className="wally-enter">
               <div key={hops} className={hops ? "wally-hop" : undefined}>
                 <div className={mood === "thinking" ? "wally-think" : "wally-float"}>
@@ -282,7 +322,7 @@ export function AskWally({
         </div>
 
         {messages.length > 0 && (
-          <div className="flex min-h-9 items-center justify-end gap-3 pt-2 text-[0.9rem]">
+          <div className="flex min-h-8 items-center justify-end gap-3 pt-1 text-[0.85rem]">
             {confirmClear ? (
               <>
                 <span className="text-ink-soft">Erase this whole conversation?</span>
@@ -301,7 +341,7 @@ export function AskWally({
           </div>
         )}
 
-        <div className={`flex flex-1 flex-col justify-end gap-3 py-4 ${empty ? "min-[900px]:flex-none min-[900px]:pt-8" : ""}`} role="log" aria-label="Conversation with Wally">
+        <div className={`flex flex-1 flex-col justify-end gap-2.5 py-3 ${empty ? "min-[900px]:flex-none min-[900px]:pt-8" : ""}`} role="log" aria-label="Conversation with Wally">
           {empty && ready && (
             <ul className="grid gap-2.5 sm:grid-cols-2" aria-label="Things to ask Wally">
               {starters.map((s, i) => (
@@ -309,7 +349,7 @@ export function AskWally({
                   <button
                     type="button"
                     onClick={() => void send(s.label)}
-                    className="press flex h-full w-full items-center gap-3 rounded-2xl bg-pad p-3 text-left font-semibold ring-1 ring-line transition-shadow ring-inset hover:ring-2 hover:ring-green"
+                    className="press card flex h-full w-full items-center gap-3 rounded-2xl bg-pad p-2.5 text-left font-semibold ring-1 ring-line transition-shadow ring-inset hover:ring-2 hover:ring-green"
                   >
                     <Tile>{s.emoji}</Tile>
                     {s.label}
@@ -333,11 +373,11 @@ export function AskWally({
               {pending.answer && <WallyTurn text={pending.answer} writing={!pending.searching} />}
               {(!pending.answer || pending.searching) && (
                 <div
-                  className="say flex w-fit items-center gap-1.5 rounded-[1.35rem] rounded-bl-md bg-pad px-4 py-4 ring-1 ring-line ring-inset"
+                  className="say card flex w-fit items-center gap-1.5 rounded-[1.35rem] rounded-bl-md bg-pad px-4 py-3.5 ring-1 ring-line ring-inset"
                   aria-label={pending.searching ? "Wally is looking something up" : "Wally is thinking"}
                 >
                   {[0, 150, 300].map((d) => (
-                    <span key={d} className="dot size-2 rounded-full bg-green" style={{ "--d": `${d}ms` } as CSSProperties} />
+                    <span key={d} className="dot size-2 rounded-full bg-[linear-gradient(135deg,var(--mint),var(--green))]" style={{ "--d": `${d}ms` } as CSSProperties} />
                   ))}
                   {pending.searching && <LookingUp />}
                 </div>
@@ -346,13 +386,13 @@ export function AskWally({
           )}
         </div>
 
-        <div className="sticky bottom-0 -mx-5 bg-paper/90 px-5 pt-2 pb-4 backdrop-blur sm:-mx-8 sm:px-8 min-[900px]:mx-0 min-[900px]:px-0">
+        <div className="dock sticky bottom-0 -mx-5 px-5 pt-3 pb-2.5 sm:-mx-8 sm:px-8 min-[900px]:mx-0 min-[900px]:px-0 min-[900px]:pb-4">
           {error && (
             <p role="alert" className="mb-2 rounded-xl border border-red/40 bg-red/5 p-3 text-[0.95rem] font-medium text-red">
               {error}
             </p>
           )}
-          <form onSubmit={submit} className="flex items-end gap-2 rounded-[1.6rem] bg-pad p-2 shadow-[0_18px_40px_-22px_rgba(22,26,43,0.35)] ring-2 ring-line transition-shadow ring-inset focus-within:ring-green">
+          <form onSubmit={submit} className="composer flex items-end gap-2 rounded-[1.6rem] p-1">
             <label htmlFor="ask" className="sr-only">
               Message Wally
             </label>
@@ -367,20 +407,20 @@ export function AskWally({
               maxLength={MAX_MESSAGE_CHARS}
               enterKeyHint="send"
               placeholder={ready ? "Tell Wally what you’re hungry for" : "Wally isn’t switched on yet"}
-              className="min-h-11 flex-1 resize-none bg-transparent px-3 py-2.5 text-[1.0625rem] placeholder:text-ink-soft outline-none! disabled:cursor-not-allowed"
+              className="min-h-11 flex-1 resize-none bg-transparent px-3.5 py-2.5 text-[1.0625rem] placeholder:text-ink-soft outline-none! disabled:cursor-not-allowed"
             />
             <button
               type="submit"
               disabled={!draft.trim() || busy || !ready}
               aria-label="Send"
-              className="press flex size-11 shrink-0 items-center justify-center rounded-full bg-green text-white hover:bg-green-deep disabled:bg-line disabled:text-ink-soft"
+              className="press fill-green flex size-11 shrink-0 items-center justify-center rounded-full bg-green text-white hover:brightness-110 disabled:bg-line disabled:text-ink-soft"
             >
               <svg viewBox="0 0 24 24" className="size-5" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                 <path d="M12 19V5M5.5 11.5 12 5l6.5 6.500" />
               </svg>
             </button>
           </form>
-          <p className="mt-2 text-center text-[0.85rem] text-ink-soft">
+          <p className="mt-1.5 text-center text-[0.72rem] leading-snug text-ink-soft min-[900px]:mt-2 min-[900px]:text-[0.85rem]">
             Wally is an AI. He can’t place orders or book tables yet. Confirm hours and prices with the restaurant.
           </p>
         </div>
@@ -395,31 +435,26 @@ export function AskWally({
   );
 }
 
-/** Open or closed, distance, rating and price: the facts about a place, from the listing. */
+/** Open or closed, rating and price: the facts about a place, from the listing, on one line. */
 function PlaceFacts({ place, fresh }: { place: NonNullable<Choice["place"]>; fresh: boolean }) {
-  const pill = "inline-flex h-6 items-center gap-1 rounded-full px-2 text-[0.8rem] font-semibold";
+  const open = fresh ? place.open : undefined;
+  if (open === undefined && place.rating === undefined && !place.price) return null;
   return (
-    <span className="mt-1 mb-1 flex flex-wrap items-center gap-1.5">
-      {fresh && place.open !== undefined && (
-        <span className={`${pill} ${place.open ? "bg-mint-wash text-green-deep" : "bg-line/70 text-ink-soft"}`}>{place.open ? "Open" : "Closed"}</span>
-      )}
-      {place.miles !== undefined && (
-        <span className={`${pill} bg-line/50 text-ink`}>
-          <svg viewBox="0 0 24 24" className="size-3.5" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-            <path d="M12 21s-7-6.200-7-11.500a7 7 0 0 1 14 0C19 14.800 12 21 12 21z" />
-            <circle cx="12" cy="9.5" r="2.5" />
-          </svg>
-          {place.miles} mi<span className="sr-only"> away</span>
+    <span className="flex items-center gap-2 text-[0.8rem] leading-[1.15rem] font-semibold text-ink-soft">
+      {open !== undefined && (
+        <span className={`inline-flex items-center gap-1 ${open ? "text-green-deep" : ""}`}>
+          <span className={`size-1.5 rounded-full ${open ? "bg-mint shadow-[0_0_0_3px_rgba(60,194,143,0.22)]" : "bg-ink-soft/50"}`} aria-hidden="true" />
+          {open ? "Open" : "Closed"}
         </span>
       )}
       {place.rating !== undefined && (
-        <span className="text-[0.85rem] font-semibold text-ink-soft">
-          <span aria-hidden="true">★ </span>
+        <span className="tabular-nums">
+          <span className="text-[#e0a100]" aria-hidden="true">★ </span>
           {place.rating.toFixed(1)}
           <span className="sr-only"> stars</span>
         </span>
       )}
-      {place.price && <span className="text-[0.85rem] font-semibold text-ink-soft">{place.price}</span>}
+      {place.price && <span>{place.price}</span>}
     </span>
   );
 }
@@ -434,7 +469,7 @@ function LookingUp() {
     return () => clearInterval(timer);
   }, []);
   return (
-    <span key={step} className="say ml-2 text-[0.95rem] leading-none text-ink-soft">
+    <span key={step} className="say shimmer ml-2 text-[0.95rem] leading-tight font-medium">
       {lookingUp[step]}
     </span>
   );
@@ -442,7 +477,7 @@ function LookingUp() {
 
 function Tile({ children }: { children: string }) {
   return (
-    <span className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-mint-wash text-[1.4rem]" aria-hidden="true">
+    <span className="tile flex size-10 shrink-0 items-center justify-center rounded-xl bg-mint-wash text-[1.3rem]" aria-hidden="true">
       {children}
     </span>
   );
@@ -454,7 +489,7 @@ function ByText() {
 
 function UserBubble({ text, byText = false, fresh = false }: { text: string; byText?: boolean; fresh?: boolean }) {
   return (
-    <p className={`ml-auto max-w-[85%] rounded-[1.35rem] rounded-br-md bg-green px-4 py-2.5 break-words whitespace-pre-wrap text-white ${fresh ? "sent-mine" : ""}`}>
+    <p className={`ml-auto max-w-[85%] rounded-[1.35rem] rounded-br-md fill-green bg-green px-4 py-2 break-words whitespace-pre-wrap text-white ${fresh ? "sent-mine" : ""}`}>
       <span className="sr-only">You: </span>
       {text}
       {byText && <ByText />}
@@ -492,9 +527,9 @@ function WallyTurn({
   );
   const places = choices?.some((c) => c.place) ?? false;
   return (
-    <div className="max-w-[92%]">
+    <div>
       {said && (
-        <p className="w-fit rounded-[1.35rem] rounded-bl-md bg-pad px-4 py-3 break-words whitespace-pre-wrap ring-1 ring-line ring-inset">
+        <p className="card w-fit max-w-[92%] rounded-[1.35rem] rounded-bl-md bg-pad px-4 py-2.5 break-words whitespace-pre-wrap ring-1 ring-line ring-inset">
           <span className="sr-only">Wally: </span>
           {said}
           {writing && <span className="caret" aria-hidden="true" />}
@@ -502,23 +537,30 @@ function WallyTurn({
         </p>
       )}
       {choices && (
-        <ul className="mt-2 grid gap-2 sm:grid-cols-2">
+        <ul className={`mt-2 grid gap-1.5 ${places ? "" : "sm:grid-cols-2"}`}>
           {choices.map((c, i) => (
             <li
               key={`${i}-${c.title}`}
-              className={`flex flex-col overflow-hidden rounded-2xl bg-pad ring-1 ring-line transition-shadow ring-inset ${live ? "arrive hover:ring-2 hover:ring-green" : "opacity-70"}`}
-              style={{ "--d": `${i * 90}ms` } as CSSProperties}
+              className={`card flex flex-col overflow-hidden rounded-2xl bg-pad ring-1 ring-line transition-shadow ring-inset ${live ? "arrive hover:ring-2 hover:ring-green" : "opacity-70"}`}
+              style={{ "--d": `${i * 70}ms` } as CSSProperties}
             >
-              <button type="button" disabled={!live} onClick={() => onPick?.(c)} className="press flex w-full flex-1 items-start gap-3 p-3 text-left">
+              <button type="button" disabled={!live} onClick={() => onPick?.(c)} className={`press flex w-full flex-1 items-start gap-2.5 px-2.5 pt-2.5 text-left ${c.place ? "pb-1.5" : "pb-2.5"}`}>
                 <Tile>{c.emoji}</Tile>
-                <span className="min-w-0">
-                  <span className="block leading-snug font-semibold">{c.title}</span>
+                <span className="min-w-0 flex-1">
+                  <span className="flex items-baseline gap-2">
+                    <span className="line-clamp-2 min-w-0 flex-1 leading-[1.3] font-semibold">{c.title}</span>
+                    {c.place?.miles !== undefined && (
+                      <span className="shrink-0 text-[0.8rem] font-semibold text-ink-soft tabular-nums">
+                        {c.place.miles} mi<span className="sr-only"> away</span>
+                      </span>
+                    )}
+                  </span>
                   {c.place && <PlaceFacts place={c.place} fresh={fresh} />}
-                  {c.detail && <span className="mt-0.5 block text-[0.92rem] leading-snug text-ink-soft">{c.detail}</span>}
+                  {c.detail && <span className={`block text-[0.875rem] leading-[1.3] text-ink-soft ${c.place ? "line-clamp-2" : "mt-0.5"}`}>{c.detail}</span>}
                 </span>
               </button>
               {c.place && (
-                <p className="flex flex-wrap items-center gap-x-3.5 gap-y-1.5 border-t border-line px-3 py-2 text-[0.88rem] font-semibold text-green">
+                <p className="flex flex-wrap items-center gap-1.5 px-2.5 pb-2.5 text-[0.8rem] font-semibold text-green-deep">
                   {[
                     // The restaurant's own site leads, and stands out from the apps beside it.
                     ...(c.place.website ? [isOwnSite(c.place.website) ? { label: "Their own site", url: c.place.website, lead: true } : { label: "Website", url: c.place.website }] : []),
@@ -530,7 +572,7 @@ function WallyTurn({
                       href={link.url}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className={"lead" in link ? "inline-flex h-7 items-center rounded-full bg-mint-wash px-2.5 text-green-deep hover:bg-mint/40" : "underline-offset-4 hover:underline"}
+                      className={`inline-flex h-7 items-center rounded-full px-2.5 transition-colors ${"lead" in link ? "chip-lead ring-1 ring-mint/50 ring-inset hover:ring-green" : "bg-paper ring-1 ring-line ring-inset hover:bg-mint-wash hover:ring-mint/60"}`}
                     >
                       {link.label}
                       <span className="sr-only"> for {c.title} (opens in a new tab)</span>
@@ -556,7 +598,7 @@ function WallyTurn({
       )}
       {places && (
         // Google's attribution rules for Places data shown without a map: the words "Google Maps", untranslated.
-        <p className="mt-1.5 text-[0.8125rem] whitespace-nowrap" style={{ fontFamily: "Roboto, sans-serif", fontWeight: 400, color: "#5E5E5E" }}>
+        <p className="mt-1 text-[0.8125rem] leading-tight whitespace-nowrap" style={{ fontFamily: "Roboto, sans-serif", fontWeight: 400, color: "#5E5E5E" }}>
           <span translate="no">Google Maps</span>
         </p>
       )}
