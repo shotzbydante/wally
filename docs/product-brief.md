@@ -8,6 +8,16 @@ A cross-platform, food-only texting agent. The user texts Wally over iMessage (S
 
 Core use cases: reorder a usual, craving to cart, cross-platform price comparison, direct order, group order, book a table, table watch, group dinner planning, manage an order or booking.
 
+## Positioning
+
+Wally gives the diner the widest choice with the least work. Today the choice is between browsing one delivery marketplace, which is convenient but costly, and hunting through restaurant sites one by one. Wally looks across all of it and brings back one answer.
+
+- **Every option in one place.** Delivery apps, restaurants' own ordering and booking sites, side by side.
+- **Local and direct first.** A restaurant's own site leads, ahead of the apps, so people can order direct and support the places near them.
+- **Why it holds.** A marketplace's own agent can only work inside that marketplace. Wally answers to the diner, so he can look everywhere.
+
+In copy, show this rather than argue it. Don't name or criticize a delivery app, and don't talk about fees. The wording to reach for: "every option", "the restaurants' own sites", "local first", "order direct".
+
 ## Constraints that shape the build
 
 - **No open API exists** for marketplace ordering or OpenTable/Resy booking. Every sanctioned route is a waitlist, partnership or hand-off, so everything sits behind a swappable connector layer.

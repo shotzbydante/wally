@@ -1,11 +1,11 @@
 import type { Metadata, Viewport } from "next";
 import type { ReactNode } from "react";
-import "@fontsource-variable/figtree";
+import "@fontsource-variable/google-sans";
 import "./globals.css";
 
 export const metadata: Metadata = {
   title: { default: "Wally", template: "%s · Wally" },
-  description: "A waiter you can text. Wally orders your food and books your tables.",
+  description: "Your personal waiter. Wally finds your food across the delivery apps and restaurants’ own sites, local spots first, and books your tables.",
 };
 
 export const viewport: Viewport = { themeColor: "#f4f6fa" };

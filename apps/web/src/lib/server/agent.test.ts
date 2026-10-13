@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { asPlainText, splitSources, withSources, type ChatMessage } from "@/lib/chat";
-import { readChoices, readWeb, toClaudeMessages } from "./agent";
+import { asPlainText, isOwnSite, splitSources, withSources, type ChatMessage } from "@/lib/chat";
+import { describePlaces, readChoices, readWeb, toClaudeMessages, type FoundPlace } from "./agent";
 
 const message = (id: number, role: ChatMessage["role"], content: string, choices: ChatMessage["choices"] = null): ChatMessage => ({
   id,
@@ -110,5 +110,23 @@ describe("readWeb", () => {
         { url: "https://b.example/2", title: "B" },
       ],
     });
+  });
+});
+
+describe("a restaurant's own site", () => {
+  it("is told apart from its page on a marketplace or social network", () => {
+    expect(isOwnSite("https://www.ginospizza.com/order")).toBe(true);
+    expect(isOwnSite("https://order.toasttab.com/online/ginos")).toBe(true);
+    expect(isOwnSite("https://www.doordash.com/store/ginos-123/")).toBe(false);
+    expect(isOwnSite("https://m.facebook.com/ginos")).toBe(false);
+    expect(isOwnSite("https://notdoordash.com/")).toBe(true);
+    expect(isOwnSite(null)).toBe(false);
+    expect(isOwnSite("not a link")).toBe(false);
+  });
+  it("is flagged for Wally so he can favor places that have one", () => {
+    const place = (name: string, website: string | null): FoundPlace => ({ id: name, name, address: "", kind: "", point: null, open: null, rating: null, ratings: null, price: null, website, maps: "https://maps.google.com/?cid=1" });
+    const found = new Map([["p1", place("Gino's", "https://ginospizza.com/")], ["p2", place("Chain", "https://www.ubereats.com/store/chain")], ["p3", place("Cart", null)]]);
+    const rows = JSON.parse(describePlaces(found, ["p1", "p2", "p3"])) as { own_site?: boolean }[];
+    expect(rows.map((r) => r.own_site)).toEqual([true, undefined, undefined]);
   });
 });

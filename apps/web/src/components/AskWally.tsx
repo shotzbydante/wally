@@ -3,15 +3,15 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type FormEvent, type KeyboardEvent } from "react";
 import { LocationBar } from "@/components/LocationBar";
 import { Wally } from "@/components/Wally";
-import { MAX_MESSAGE_CHARS, OPEN_BADGE_MINUTES, deliveryLinks, hostOf, splitSources, type ChatEvent, type ChatMessage, type Choice } from "@/lib/chat";
+import { MAX_MESSAGE_CHARS, OPEN_BADGE_MINUTES, deliveryLinks, hostOf, isOwnSite, splitSources, type ChatEvent, type ChatMessage, type Choice } from "@/lib/chat";
 
 /** What Wally is doing, which drives how he moves and what his bubble says. */
 type Mood = "idle" | "thinking" | "speaking" | "sorry";
 
 const starters = [
   { emoji: "🍜", label: "Help me pick dinner tonight" },
+  { emoji: "🏡", label: "Great local spots near me" },
   { emoji: "🕯️", label: "Plan a date night" },
-  { emoji: "🌶️", label: "Something spicy, under $25" },
   { emoji: "🎟️", label: "How do I land a hard-to-get table?" },
 ];
 
@@ -27,11 +27,7 @@ const problems: Record<string, string> = {
   clear_failed: "The conversation wasn’t erased. Wally’s records didn’t respond. Try again in a moment.",
 };
 
-function greeting(name: string): string {
-  const hour = new Date().getHours();
-  const part = hour < 5 ? "Good evening" : hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
-  return `${part}${name ? `, ${name}` : ""}. I’m Wally. What are we eating?`;
-}
+const greeting = (name: string) => `Hi${name ? ` ${name}` : ""}, I’m Wally, your personal waiter. What can I serve up for you today?`;
 
 const noSubscription = () => () => {};
 const nearBottom = () => window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 220;
@@ -60,9 +56,7 @@ export function AskWally({
   const [pending, setPending] = useState<{ text: string; answer: string; searching: boolean } | null>(null);
   const [mood, setMood] = useState<Mood>("idle");
   const [error, setError] = useState<string | null>(null);
-  // The greeting depends on the visitor's clock, so the server renders none
-  // and the browser fills it in.
-  const hello = useSyncExternalStore(noSubscription, () => greeting(name), () => null);
+  const hello = greeting(name);
   const [confirmClear, setConfirmClear] = useState(false);
   /** Changes each time an answer lands, to replay Wally's hop. */
   const [hops, setHops] = useState(0);
@@ -281,7 +275,8 @@ export function AskWally({
           <h1 className="arrive font-display text-5xl font-bold tracking-[-0.025em]">Ask Wally</h1>
           {empty && (
             <p className="arrive mt-3 max-w-[30rem] text-xl text-ink-soft" style={{ "--d": "120ms" } as CSSProperties}>
-              Dinner ideas, date nights, group plans, and how to land the table everyone wants.
+              Every place worth knowing near you, local favorites first. Dinner ideas, date nights, and how to land the
+              table everyone wants.
             </p>
           )}
         </div>
@@ -523,13 +518,20 @@ function WallyTurn({
                 </span>
               </button>
               {c.place && (
-                <p className="flex flex-wrap gap-x-3.5 gap-y-1 border-t border-line px-3 py-2 text-[0.88rem] font-semibold text-green">
+                <p className="flex flex-wrap items-center gap-x-3.5 gap-y-1.5 border-t border-line px-3 py-2 text-[0.88rem] font-semibold text-green">
                   {[
-                    ...(c.place.website ? [{ label: "Website", url: c.place.website }] : []),
+                    // The restaurant's own site leads, and stands out from the apps beside it.
+                    ...(c.place.website ? [isOwnSite(c.place.website) ? { label: "Their own site", url: c.place.website, lead: true } : { label: "Website", url: c.place.website }] : []),
                     ...deliveryLinks(c.title).map((d) => ({ label: d.app, url: d.url })),
                     { label: "Map", url: c.place.maps },
                   ].map((link) => (
-                    <a key={link.label} href={link.url} target="_blank" rel="noopener noreferrer" className="underline-offset-4 hover:underline">
+                    <a
+                      key={link.label}
+                      href={link.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className={"lead" in link ? "inline-flex h-7 items-center rounded-full bg-mint-wash px-2.5 text-green-deep hover:bg-mint/40" : "underline-offset-4 hover:underline"}
+                    >
                       {link.label}
                       <span className="sr-only"> for {c.title} (opens in a new tab)</span>
                     </a>

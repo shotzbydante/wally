@@ -92,7 +92,7 @@ describe("place cards", () => {
   it("tells Claude what was found without links or Google ids", () => {
     const told = describePlaces(found, ["p1", "p4"]);
     expect(JSON.parse(told)).toEqual([
-      { id: "p1", name: "Far Open", kind: "Bakery", miles: 3.2, open_now: true, rating: 4.5, ratings: 10, address: "1 Main St" },
+      { id: "p1", name: "Far Open", kind: "Bakery", miles: 3.2, open_now: true, rating: 4.5, ratings: 10, own_site: true, address: "1 Main St" },
       { id: "p4", name: "Unknown Hours", kind: "Bakery", miles: 0.9, open_now: "unknown", rating: 4.5, ratings: 10, address: "1 Main St" },
     ]);
     expect(describePlaces(found, [])).toMatch(/No places matched/);

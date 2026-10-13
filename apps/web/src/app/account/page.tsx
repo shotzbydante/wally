@@ -78,7 +78,7 @@ async function Account({ searchParams }: { searchParams: Query }) {
             <h1 className="font-display text-[2rem] leading-tight font-bold tracking-[-0.02em] sm:text-4xl">
               {session.name ? `Welcome in, ${session.name}.` : "Welcome in."}
             </h1>
-            <p className="mt-1 text-ink-soft">Your account, and how Wally reaches the places you eat.</p>
+            <p className="mt-1 text-ink-soft">Your account, and everywhere Wally can look for your next meal.</p>
           </div>
         </div>
 
@@ -130,7 +130,16 @@ async function Account({ searchParams }: { searchParams: Query }) {
           />
         </Section>
 
-        <Section title="Delivery apps" subtitle="Where Wally can order from for you">
+        <Section title="Restaurants direct" subtitle="Where Wally looks first">
+          <Row
+            icon={<Glyph>🏡</Glyph>}
+            title="Restaurants’ own sites"
+            detail="When a restaurant has its own site, Wally puts it ahead of the apps so you can order direct. Nothing to connect."
+            action={<Done>On</Done>}
+          />
+        </Section>
+
+        <Section title="Delivery apps" subtitle="More places Wally can order from for you">
           {delivery.map((s) => (
             <ServiceRow key={s.name} service={s} />
           ))}

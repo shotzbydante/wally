@@ -46,7 +46,7 @@ export function Recover({ error }: { error: Error & { digest?: string } }) {
 
   const button = { height: 48, padding: "0 24px", borderRadius: 999, font: "inherit", fontWeight: 600, cursor: "pointer", border: 0, textDecoration: "none", display: "inline-flex", alignItems: "center" } as const;
   return (
-    <main style={{ minHeight: "100dvh", display: "flex", flexDirection: "column", justifyContent: "center", maxWidth: 560, margin: "0 auto", padding: 24, background: "#f4f6fa", color: "#161a2b", fontFamily: '"Figtree Variable", system-ui, -apple-system, sans-serif' }}>
+    <main style={{ minHeight: "100dvh", display: "flex", flexDirection: "column", justifyContent: "center", maxWidth: 560, margin: "0 auto", padding: 24, background: "#f4f6fa", color: "#161a2b", fontFamily: '"Google Sans Variable", system-ui, -apple-system, sans-serif' }}>
       {stuck ? (
         <>
           <h1 style={{ fontSize: "2rem", fontWeight: 700, lineHeight: 1.15, margin: 0, letterSpacing: "-0.02em" }}>This page tripped.</h1>

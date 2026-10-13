@@ -28,8 +28,8 @@
   --color-green-deep: var(--green-deep);
   --color-butter: var(--butter);
   --color-red: var(--red);
-  --font-display: "Figtree Variable", system-ui, -apple-system, sans-serif;
-  --font-sans: "Figtree Variable", system-ui, -apple-system, sans-serif;
+  --font-display: "Google Sans Variable", system-ui, -apple-system, sans-serif;
+  --font-sans: "Google Sans Variable", system-ui, -apple-system, sans-serif;
 }
 
 html {

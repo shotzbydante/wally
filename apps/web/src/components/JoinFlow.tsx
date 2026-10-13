@@ -136,7 +136,7 @@ export function JoinFlow({ wallyNumber }: { wallyNumber: string | null }) {
   };
 
   const lines: Record<Step, string> = {
-    name: "Good evening! I’m Wally, and I’ll be looking after you. What should I call you?",
+    name: "Hi, I’m Wally, your personal waiter. What should I call you?",
     contact: `${first}! Wonderful. Where should I text you?`,
     texts: `Nearly there, ${first}. A quick word on how I text.`,
     code: `I’ve just texted you a code, ${first}. Read it back to me?`,
@@ -208,7 +208,7 @@ export function JoinFlow({ wallyNumber }: { wallyNumber: string | null }) {
                   />
                   <Field
                     label="ZIP code"
-                    hint="So I know which kitchens are near you."
+                    hint="So I can find every kitchen near you, local spots first."
                     value={zip}
                     onChange={(v) => setZip(v.replace(/\D/g, "").slice(0, 5))}
                     error={errors.zip}

@@ -118,5 +118,21 @@ export function deliveryLinks(name: string): { app: string; url: string }[] {
   ];
 }
 
+/**
+ * Sites that list many restaurants, or host a page for one. A link to any of
+ * them is not the restaurant's own site, so a card doesn't present it as one.
+ */
+const NOT_THEIR_OWN = [
+  "doordash.com", "ubereats.com", "grubhub.com", "postmates.com", "seamless.com", "trycaviar.com", "instacart.com",
+  "opentable.com", "resy.com", "exploretock.com", "yelp.com", "tripadvisor.com", "google.com", "goo.gl",
+  "facebook.com", "instagram.com", "linktr.ee",
+];
+
+/** True when the link is the restaurant's own site rather than its page on a marketplace or social network. */
+export function isOwnSite(url: string | undefined | null): boolean {
+  const host = url ? hostOf(url) : "";
+  return Boolean(host) && !NOT_THEIR_OWN.some((site) => host === site || host.endsWith(`.${site}`));
+}
+
 /** How long after an answer its "open" and "closed" badges are still worth showing. */
 export const OPEN_BADGE_MINUTES = 30;
