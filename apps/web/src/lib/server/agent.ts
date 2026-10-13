@@ -40,10 +40,11 @@ const FINDING_WITH_PLACES = `# Finding places
 - Results are held to about 25 miles around their saved address. If nothing fits, say so and offer to look in a named area.
 - Don't announce that you're going to look. Just call the tool.
 - Then call show_places with the ids of the four that fit best (fewer only if fewer fit), favoring places that are open and close by. For each place give one short reason it fits.
-- Before show_places, write one or two sentences, under 40 words, the way a waiter recommends: lead with your top pick by name and why, using what find_places told you (what it's known for, it's the closest, it's still open and until when, it's the best rated, its price). You may add one more standout. Don't walk through every place; the cards do that.
+- Every show_places call must carry your recommendation in its intro field. It is shown above the cards, and cards never go out without it. Don't also type it as a message before the tool.
+- The intro is one or two sentences, under 40 words, in your own voice: a waiter who has opinions and enjoys this. Lead with your top pick by name and why, using what find_places told you (what it's known for, it's the closest, it's still open and until when, it's the best rated, its price). You may add one more standout. A little warmth or wit is welcome ("If it were my night off, I'd head to..."); a dry list of facts is not. Don't walk through every place; the cards do that.
 - known_for is the listing's own description of a place. When a place has one, use it: say what the place is known for in your recommendation and in its card's reason, in your own few words. It is the only thing you know about what a place serves. If a place has no known_for, don't guess one.
 - Say only what find_places told you about a place. Never add an address, hours, price, dish, menu item or review from memory. You don't know what any place has on its menu or in stock today, so never say a dish or cake is available.
-- When the person asks to see more, call find_places again with the same query, then show the next four that are not marked already_shown. If everything is already_shown, try one different wording of the query. If there is still nothing new, say that's everything nearby and offer to widen the search. Your sentence before these cards can be shorter.
+- When the person asks to see more, call find_places again with the same query, then show the next four that are not marked already_shown. If everything is already_shown, try one different wording of the query. If there is still nothing new, say that's everything nearby and offer to widen the search. The intro for these can be shorter, but is still required.
 - Give the person real choice. Look past the obvious names: neighborhood and independent places belong beside the well-known ones. When two places fit equally well, pick the independent one with its own site (own_site in the results) over a chain.
 - Each card links to the restaurant's own site first, then to delivery apps. When someone asks how to order from a place, point them to its own site first and mention the apps as the alternative.
 - If nothing fits, say so plainly and suggest widening the search.
@@ -153,10 +154,11 @@ const FIND_PLACES_TOOL: Anthropic.Tool = {
 const SHOW_PLACES_TOOL: Anthropic.Tool = {
   name: "show_places",
   description:
-    "Show places from find_places as cards (a numbered list by text). Each card shows the place's name, distance, whether it's open, and links, taken from the listing. Call it at most once, after your one or two sentences of recommendation, and end your turn with it.",
+    "Show places from find_places as cards (a numbered list by text). Each card shows the place's name, distance, whether it's open, and links, taken from the listing. Call it at most once and end your turn with it. Put your recommendation in intro, not in a message before the call.",
   input_schema: {
     type: "object",
     properties: {
+      intro: { type: "string", description: "Required. Your recommendation, shown above the cards: one or two sentences under 40 words, in Wally's voice, leading with your top pick by name and why." },
       places: {
         type: "array",
         minItems: 1,
@@ -172,7 +174,7 @@ const SHOW_PLACES_TOOL: Anthropic.Tool = {
         },
       },
     },
-    required: ["places"],
+    required: ["intro", "places"],
   },
 };
 
@@ -343,6 +345,19 @@ export function placeChoices(input: unknown, found: ReadonlyMap<string, FoundPla
   return choices.length ? choices.slice(0, MAX_CHOICES) : null;
 }
 
+/**
+ * The line above place cards. Claude is asked to write it; if he didn't,
+ * this plain one stands in, built from the first card, so cards never
+ * arrive without a word from Wally.
+ */
+export function placesIntro(input: unknown, choices: Choice[]): string {
+  const written = clip((input as { intro?: unknown } | null)?.intro, 400);
+  if (written) return written;
+  const top = choices[0]!;
+  const why = [top.place?.miles !== undefined && `${top.place.miles} miles away`, top.place?.open === true && "open now", top.place?.rating !== undefined && `rated ${top.place.rating.toFixed(1)}`].filter(Boolean);
+  return `I'd start with ${top.title}${why.length ? `: ${why.join(", ")}` : ""}.${choices.length > 1 ? " A few more worth a look are below." : ""}`;
+}
+
 export interface Reply {
   /** What Wally said, with any sources as a closing block (see withSources). */
   content: string;
@@ -466,6 +481,8 @@ export async function reply(thread: ChatMessage[], guest: Guest, channel: Channe
           answer({ content: "None of those ids came from find_places. Call find_places first, then show_places with ids from its results.", is_error: true });
           continue;
         }
+        // His recommendation rides in the tool call. If he also said something this turn, that stands.
+        if (choices && !text.trim()) write(placesIntro(tool.input, choices));
       } else choicesInput = tool.input;
       break;
     }
