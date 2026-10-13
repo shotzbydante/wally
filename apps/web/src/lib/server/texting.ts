@@ -1,5 +1,5 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
-import { asPlainText } from "@/lib/chat";
+import { asTexts, tidyLink, webNudgeDue } from "@/lib/chat";
 import { linkPhone } from "./accounts";
 import { AgentError, reply } from "./agent";
 import { beginTextTurn, saveReply, setTextStopped, undoTurn } from "./conversation";
@@ -188,7 +188,9 @@ function showTyping(provider: Provider, to: string): void {
 // Fixed wording: these are notices, not conversation (see "Conventions" in CLAUDE.md).
 const NOTICE = {
   unknown: (origin: string) => `Hi, I'm Wally, an AI waiter. I don't know this number yet. Sign in at ${origin}/account and tap Connect by text, or sign up at ${origin}/join.`,
-  hello: "Wally here, your AI waiter. Save my contact card so you know it's me. Everything we say here also shows up at wallywaiter.com. Reply STOP to stop texts, HELP for help.",
+  hello: "Wally here, your AI waiter. Save my contact card so you know it's me. Reply STOP to stop texts, HELP for help.",
+  // Closes his first answer, and comes back only after a quiet week (webNudgeDue).
+  web: (origin: string) => `P.S. This same conversation lives at ${tidyLink(`${origin}/ask`)}, with tappable cards for every place. Text me or pick it up there: the two stay in sync.`,
   stopped: "You won't get any more texts from Wally. Reply START to turn them back on.",
   started: "Texts from Wally are back on. What can I get you?",
   connected: "You're connected: this number is now on your Wally account, and we share one conversation with the website. Text me what you're hungry for.",
@@ -258,7 +260,11 @@ export async function handleInbound(inbound: Inbound, origin: string): Promise<v
     try {
       const answer = await reply(begun.messages, { name: account.name, zip: account.zip, near: account.near, address: account.address }, "text", { onText: () => {} });
       const saved = await saveReply(account.id, "text", answer.content, answer.choices);
-      if (saved) await sendText(provider, from, asPlainText(answer));
+      if (saved) {
+        // One bubble for his words, one for the cards, and now and then a pointer to the website.
+        const texts = [...asTexts(answer), ...(begun.first || webNudgeDue(begun.messages) ? [NOTICE.web(origin)] : [])];
+        for (const part of texts) if (!(await sendText(provider, from, part))) break;
+      }
     } catch (error) {
       // Take the unanswered text back out of the thread, as the website does.
       await undoTurn(account.id, begun.id).catch(() => {});

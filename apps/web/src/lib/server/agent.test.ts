@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { asPlainText, isOwnSite, splitSources, withSources, type ChatMessage } from "@/lib/chat";
+import { asPlainText, asTexts, isOwnSite, tidyLink, webNudgeDue, splitSources, withSources, type ChatMessage } from "@/lib/chat";
 import { describePlaces, readChoices, readWeb, toClaudeMessages, type FoundPlace } from "./agent";
 
 const message = (id: number, role: ChatMessage["role"], content: string, choices: ChatMessage["choices"] = null): ChatMessage => ({
@@ -128,5 +128,32 @@ describe("a restaurant's own site", () => {
     const found = new Map([["p1", place("Gino's", "https://ginospizza.com/")], ["p2", place("Chain", "https://www.ubereats.com/store/chain")], ["p3", place("Cart", null)]]);
     const rows = JSON.parse(describePlaces(found, ["p1", "p2", "p3"])) as { own_site?: boolean }[];
     expect(rows.map((r) => r.own_site)).toEqual([true, undefined, undefined]);
+  });
+});
+
+describe("asTexts", () => {
+  const cookies = { emoji: "🍪", title: "Insomnia Cookies", detail: "Open late, warm cookies", reply: "x", place: { id: "a", miles: 2.8, open: true, rating: 4.5, price: "$", website: "https://insomniacookies.com/", maps: "https://maps.google.com/?cid=1" } };
+  const closed = { emoji: "🥛", title: "DeLuscious", detail: "", reply: "x", place: { id: "b", miles: 1.1, open: false, maps: "https://maps.google.com/?cid=2" } };
+  it("sends his words and the cards as separate texts, a small card per place", () => {
+    expect(asTexts({ content: "Insomnia is my pick.", choices: [cookies, closed] })).toEqual([
+      "Insomnia is my pick.",
+      "1. 🍪 Insomnia Cookies\nOpen now · 2.8 mi · ★ 4.5 · $\nOpen late, warm cookies\ninsomniacookies.com\n\n2. 🥛 DeLuscious\nClosed · 1.1 mi\nhttps://maps.google.com/?cid=2",
+    ]);
+    expect(asTexts({ content: "Just words.", choices: null })).toEqual(["Just words."]);
+    expect(asTexts({ content: "Two ideas.", choices: [ramen, tacos] })).toEqual(["Two ideas.", "1. 🍜 Ramen\nRich and warm\n\n2. 🌮 Tacos"]);
+  });
+  it("shortens a plain link and leaves the rest alone", () => {
+    expect(tidyLink("http://www.delusciouscookies.com/")).toBe("delusciouscookies.com");
+    expect(tidyLink("https://bestia.example/menu/?utm_source=google")).toBe("bestia.example/menu");
+    expect(tidyLink("https://bestia.example/order?store=4")).toBe("https://bestia.example/order?store=4");
+    expect(tidyLink("not a link")).toBe("not a link");
+  });
+  it("points to the website on his first text, then only after a quiet week", () => {
+    const now = Date.parse("2026-10-13T06:00:00Z");
+    const said = (channel: "web" | "text", created_at: string) => ({ role: "assistant" as const, channel, created_at });
+    expect(webNudgeDue([], now)).toBe(true);
+    expect(webNudgeDue([said("web", "2026-10-13T05:00:00Z")], now)).toBe(true);
+    expect(webNudgeDue([said("text", "2026-10-12T05:00:00Z")], now)).toBe(false);
+    expect(webNudgeDue([said("text", "2026-10-01T05:00:00Z")], now)).toBe(true);
   });
 });

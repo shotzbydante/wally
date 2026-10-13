@@ -67,6 +67,64 @@ export function asPlainText(message: Pick<ChatMessage, "content" | "choices">): 
 }
 
 /**
+ * A link as a text thread shows it: "insomniacookies.com", not "https://insomniacookies.com/".
+ * Phones still make it tappable. Anything with a query or fragment is left whole, since
+ * those don't reliably become links without the scheme.
+ */
+export function tidyLink(url: string): string {
+  try {
+    const u = new URL(url);
+    if (!/^https?:$/.test(u.protocol)) return url;
+    for (const key of [...u.searchParams.keys()]) if (/^(utm_|fbclid$|gclid$)/i.test(key)) u.searchParams.delete(key);
+    if (u.search || u.hash || u.username) return u.href;
+    return u.host.replace(/^www\./, "") + u.pathname.replace(/\/+$/, "");
+  } catch {
+    return url;
+  }
+}
+
+/**
+ * A message as the texts Wally sends: his words in one bubble, then the
+ * options in a second, each a small card of its own:
+ *
+ *   1. 🍪 Insomnia Cookies
+ *   Open now · 2.8 mi · ★ 4.5
+ *   Open late, warm cookies
+ *   insomniacookies.com
+ *
+ * Numbers stay, because a person may answer with one. `asPlainText` remains
+ * the record Wally reads back; this is only how it looks on a phone.
+ */
+export function asTexts(message: Pick<ChatMessage, "content" | "choices">): string[] {
+  const cards = (message.choices ?? []).map((c, i) => {
+    const p = c.place;
+    const facts = [
+      p?.open === true && "Open now",
+      p?.open === false && "Closed",
+      p?.miles !== undefined && `${p.miles} mi`,
+      p?.rating !== undefined && `★ ${p.rating.toFixed(1)}`,
+      p?.price,
+    ].filter(Boolean);
+    const link = p?.website ?? p?.maps ?? c.url;
+    return [`${i + 1}. ${c.emoji ? `${c.emoji} ` : ""}${c.title}`, facts.join(" · "), c.detail, link && tidyLink(link)].filter(Boolean).join("\n");
+  });
+  return [message.content.trim(), cards.join("\n\n")].filter(Boolean);
+}
+
+/** How long texting must have been quiet before Wally mentions the website again. */
+const WEB_NUDGE_QUIET_DAYS = 7;
+
+/**
+ * Whether this answer should end with the pointer to the website: on Wally's
+ * first text to someone, and again only after a week without texts from him.
+ * `thread` is the conversation before this answer.
+ */
+export function webNudgeDue(thread: Pick<ChatMessage, "role" | "channel" | "created_at">[], now = Date.now()): boolean {
+  const since = now - WEB_NUDGE_QUIET_DAYS * 86_400_000;
+  return !thread.some((m) => m.role === "assistant" && m.channel === "text" && Date.parse(m.created_at) > since);
+}
+
+/**
  * Sources travel inside the message text, as a closing block:
  *
  *   Sources:
