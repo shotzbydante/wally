@@ -36,7 +36,7 @@ function Pin({ className }: { className: string }) {
 /**
  * The address Wally searches near. It stays pinned to the top of the page
  * while the conversation scrolls, so it can be changed at any point.
- * AskWally's sticky offsets assume this bar is 3.5rem tall.
+ * It sits under the pinned header (SignedInHeader). AskWally's sticky offsets assume this bar is 3.5rem tall.
  */
 export function LocationBar({ saved, onChange }: { saved: string | null; onChange: (address: string | null) => void }) {
   const [editing, setEditing] = useState(false);
@@ -143,7 +143,7 @@ export function LocationBar({ saved, onChange }: { saved: string | null; onChang
   const quiet = "press h-8 shrink-0 rounded-full px-3 text-[0.9rem] font-semibold text-ink-soft hover:text-ink disabled:opacity-50";
 
   return (
-    <div className="sticky top-0 z-20 bg-paper/95 backdrop-blur">
+    <div className="sticky top-12 z-20 bg-paper/95 backdrop-blur sm:top-[3.75rem]">
       <div className="relative mx-auto w-full max-w-[1080px] px-5 py-2 sm:px-8">
         {/* With no address yet the bar is tinted and outlined, so it reads as the next thing to do. */}
         <div
