@@ -67,6 +67,7 @@ const FINDING_WITH_WEB = `# Finding places
 
 const ORDERING = `# Ordering (restaurants that take orders through Square)
 - You can build a pickup order at some restaurants and hand the person a page to pay on. The person pays the restaurant directly; you never take payment.
+- When someone asks which places you can order from, what's orderable nearby, or where to order right now, call show_orderable_places. It shows the nearby restaurants that take orders as cards, nearest first, with an intro in your voice. They are pickup orders; say so when it matters.
 - When someone wants to order something, call find_menu with the restaurant's name and the dish in their words. It tells you whether the place takes orders this way, and lists matching menu items with their prices and the choices each one needs (a base, a protein, a size).
 - If the place doesn't take orders this way, say so in one line and point them to its own site or the delivery apps on its card. Never pretend to order anywhere else.
 - Before building the order, you must know every required choice. Ask for the ones the person hasn't given, in one message, offering the options by name. Don't guess a protein or a base.
@@ -211,6 +212,19 @@ const FIND_MENU_TOOL: Anthropic.Tool = {
   },
 };
 
+const ORDERABLE_PLACES_TOOL: Anthropic.Tool = {
+  name: "show_orderable_places",
+  description: "Shows the restaurants near the person where you can build a pickup order, as cards (nearest first, open first). Use it when they ask what you can order from. Call it once and end your turn with it.",
+  input_schema: {
+    type: "object",
+    properties: {
+      intro: { type: "string", description: "One or two sentences under 35 words, in Wally's voice, shown above the cards. Say these are places where the order can be built right here, for pickup." },
+      dish: { type: "string", description: "Optional: a kind of food the person mentioned, used only to pick an emoji per card." },
+    },
+    required: ["intro"],
+  },
+};
+
 const ORDER_TICKET_TOOL: Anthropic.Tool = {
   name: "order_ticket",
   description:
@@ -226,6 +240,26 @@ const ORDER_TICKET_TOOL: Anthropic.Tool = {
     required: ["item", "options", "quantity", "line"],
   },
 };
+
+/** Cards for the stores Wally can order from, nearest first with open ones ahead. */
+export function orderableChoices(stores: Store[], max = 8): Choice[] {
+  return [...stores]
+    .sort((a, b) => Number(b.open ?? true) - Number(a.open ?? true) || (a.miles ?? Infinity) - (b.miles ?? Infinity))
+    .slice(0, max)
+    .map((s) => ({
+      emoji: "🧾",
+      title: s.name.slice(0, 60),
+      detail: s.address ? `Pickup from ${s.address}` : "Pickup",
+      reply: `Order from ${s.name}`.slice(0, 120),
+      place: {
+        id: `mealme:${s.id}`,
+        ...(s.miles !== undefined ? { miles: s.miles } : {}),
+        ...(s.open !== undefined ? { open: s.open } : {}),
+        maps: `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${s.name} ${s.address}`.trim())}`,
+        orders: true,
+      },
+    }));
+}
 
 /** The menu items find_menu returned this turn, by the short ids Claude quotes back. */
 export interface MenuFound {
@@ -589,7 +623,7 @@ export async function reply(thread: ChatMessage[], guest: Guest, channel: Channe
         ],
         // Places come from the places search when it is on. Web search is only the fallback
         // without it, so review and listing sites never appear beside real place cards.
-        tools: [...(hasPlaces ? [FIND_PLACES_TOOL, SHOW_PLACES_TOOL] : [searchTool(guest)]), ...(canOrder ? [FIND_MENU_TOOL, ORDER_TICKET_TOOL] : []), CHOICES_TOOL],
+        tools: [...(hasPlaces ? [FIND_PLACES_TOOL, SHOW_PLACES_TOOL] : [searchTool(guest)]), ...(canOrder ? [FIND_MENU_TOOL, ORDER_TICKET_TOOL, ORDERABLE_PLACES_TOOL] : []), CHOICES_TOOL],
         // One tool at a time: a search has to finish before options are shown.
         tool_choice: { type: "auto", disable_parallel_tool_use: true },
         messages,
@@ -597,7 +631,7 @@ export async function reply(thread: ChatMessage[], guest: Guest, channel: Channe
       stream.on("streamEvent", (event) => {
         if (event.type === "content_block_start") {
           const block = event.content_block;
-          if (block.type === "server_tool_use" || (block.type === "tool_use" && [FIND_PLACES_TOOL.name, FIND_MENU_TOOL.name, ORDER_TICKET_TOOL.name].includes(block.name))) listener.onSearch?.();
+          if (block.type === "server_tool_use" || (block.type === "tool_use" && [FIND_PLACES_TOOL.name, FIND_MENU_TOOL.name, ORDER_TICKET_TOOL.name, ORDERABLE_PLACES_TOOL.name].includes(block.name))) listener.onSearch?.();
           if (block.type !== "text" && block.type !== "thinking") breakBeforeText = true;
         } else if (event.type === "content_block_delta" && event.delta.type === "text_delta") write(event.delta.text);
       });
@@ -623,6 +657,20 @@ export async function reply(thread: ChatMessage[], guest: Guest, channel: Channe
       if (tool.name === FIND_MENU_TOOL.name) {
         answer(await findMenu(tool.input));
         continue;
+      }
+      if (tool.name === ORDERABLE_PLACES_TOOL.name) {
+        const stores = await orderableStores();
+        if (!zipOf(guest.address) && !guest.zip) {
+          answer({ content: "You need a 5-digit ZIP to list restaurants that take orders. Ask the person for theirs in one short line.", is_error: true });
+          continue;
+        }
+        if (!stores.length) {
+          answer({ content: "No restaurants near their ZIP take orders through Wally yet. Say so plainly, and offer to find places another way.", is_error: true });
+          continue;
+        }
+        choices = orderableChoices(stores);
+        if (!text.trim()) write(clip((tool.input as { intro?: unknown })?.intro, 300) || "Here's where I can build your order for pickup.");
+        break;
       }
       if (tool.name === ORDER_TICKET_TOOL.name) {
         const built = await orderTicket(tool.input);

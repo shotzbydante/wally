@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { dollars, ticketLines, asPlainText, asTexts } from "@/lib/chat";
-import { describeMenu, storeMatches, type MenuFound } from "./agent";
+import { describeMenu, orderableChoices, storeMatches, type MenuFound } from "./agent";
 import { checkout, sameStore, searchMenu, searchStores, zipOf, type MenuItem, type Store } from "./mealme";
 
 afterEach(() => {
@@ -74,6 +74,12 @@ describe("ordering in the agent", () => {
     expect(sameStore({ name: "Poke Bar Los Angeles", address: "" }, store)).toBe(true);
     expect(sameStore({ name: "Poke Bar", address: "9000 Sunset Blvd" }, store)).toBe(false);
     expect(sameStore({ name: "Sushi Gen", address: "5273 W Olympic Blvd" }, store)).toBe(false);
+  });
+  it("lists orderable stores as cards, open and nearest first", () => {
+    const cards = orderableChoices([{ ...store, name: "Far", miles: 3, open: true, id: "b" }, { ...store, name: "Closed", miles: 0.1, open: false, id: "c" }, store]);
+    expect(cards.map((c) => c.title)).toEqual(["Poke Bar Los Angeles", "Far", "Closed"]);
+    expect(cards[0]).toMatchObject({ emoji: "🧾", reply: "Order from Poke Bar Los Angeles", place: { orders: true, miles: 0.7, open: true } });
+    expect(cards[0]!.place!.maps).toContain("Poke%20Bar");
   });
   it("tells Claude the menu with short ids for items and options", () => {
     const found: MenuFound = { store, items: new Map([["m1", bowl]]), options: new Map([["o1", { itemId: "m1", listId: "L1", optionId: "M1" }], ["o2", { itemId: "m1", listId: "L1", optionId: "M2" }], ["o3", { itemId: "m1", listId: "L2", optionId: "M3" }], ["o4", { itemId: "m1", listId: "L2", optionId: "M4" }]]) };
