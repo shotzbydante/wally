@@ -102,7 +102,7 @@ These come from the PRD and exist because of real failures at competitors.
 - One dish per checkout (with options and quantity): MealMe's Square checkout takes a single item spec and ignores extra cart items. Build a second ticket for a second dish.
 - The web shows a ticket as a restaurant check (`Ticket` in `AskWally.tsx`) with a Pay button; `asTexts` writes it as a text card with the pay link; `asPlainText` is what Claude reads back.
 - MealMe's catalog descriptions are the restaurant's; Wally may quote prices and choices from `find_menu` only.
-- A place search near the saved address also fetches the orderable stores for that ZIP once per turn (`orderableStores`) and marks each Google place that is one of them (`sameStore`: names match loosely both ways and street numbers agree) with `orders: true` on its `PlaceInfo`. The card shows an "Order with Wally" badge, texts say the same, `describePlaces` passes `can_order`, and the prompt treats it as a tiebreaker only: never over a better fit, a closer place, or one that is open.
+- A place search near the saved address also fetches the orderable stores for that ZIP once per turn (`orderableStores`) and marks each Google place that is one of them (`sameStore`: names match loosely both ways and street numbers agree) with `orders: true` on its `PlaceInfo`. The card shows an "Order with Wally" badge, texts say the same, `describePlaces` passes `can_order`, and the prompt treats it as a tiebreaker only: never over a better fit, a closer place, or one that is open. `show_orderable_places` lists those stores directly as cards (`orderableChoices`, open and nearest first, with a Maps search link) when the person asks what Wally can order from.
 
 ## Texting Wally
 
