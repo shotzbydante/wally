@@ -10,6 +10,34 @@ export interface Choice {
   url?: string;
   /** Set when the option is a real place from the places search. */
   place?: PlaceInfo;
+  /** Set when the card is an order ready to pay (see TicketInfo). */
+  ticket?: TicketInfo;
+}
+
+/**
+ * An order Wally built, ready for the person to pay on the restaurant's own
+ * checkout page. Every figure comes from the restaurant's system, in cents.
+ */
+export interface TicketInfo {
+  restaurant: string;
+  address: string;
+  item: string;
+  variation: string;
+  modifiers: string[];
+  quantity: number;
+  subtotal: number;
+  tax: number;
+  total: number;
+  /** The restaurant's checkout page, where the person pays. */
+  checkoutUrl: string;
+}
+
+export const dollars = (cents: number) => `$${(cents / 100).toFixed(2)}`;
+
+/** The ticket as lines of text: "1 × Small Poke Bowl (White Rice, Salmon)", subtotal, tax, total. */
+export function ticketLines(t: TicketInfo): string[] {
+  const what = `${t.quantity} × ${t.item}${t.variation && t.variation !== "Regular" ? ` (${t.variation})` : ""}${t.modifiers.length ? ` with ${t.modifiers.join(", ")}` : ""}`;
+  return [what, `Subtotal ${dollars(t.subtotal)}`, `Tax ${dollars(t.tax)}`, `Total ${dollars(t.total)}`, "Pickup. Pay on the restaurant's checkout page."];
 }
 
 /** What a card shows about a real place. Everything here comes from the places search, not from Wally's words. */
@@ -59,6 +87,7 @@ export const MAX_MESSAGE_CHARS = 2000;
  */
 export function asPlainText(message: Pick<ChatMessage, "content" | "choices">): string {
   const list = (message.choices ?? []).map((c, i) => {
+    if (c.ticket) return `${i + 1}. Order at ${c.ticket.restaurant}: ${ticketLines(c.ticket).join("; ")} ${c.ticket.checkoutUrl}`;
     const facts = [c.place?.miles !== undefined && `${c.place.miles} mi`, c.place?.open === true && "open", c.place?.open === false && "closed"].filter(Boolean);
     const link = c.place?.website ?? c.place?.maps ?? c.url;
     return `${i + 1}. ${c.title}${facts.length ? ` (${facts.join(", ")})` : ""}${c.detail ? `: ${c.detail}` : ""}${link ? ` ${link}` : ""}`;
@@ -102,6 +131,7 @@ export function tidyLink(url: string): string {
  */
 export function asTexts(message: Pick<ChatMessage, "content" | "choices">, origin: string, sayInSync = false): string[] {
   const cards = (message.choices ?? []).map((c, i) => {
+    if (c.ticket) return [`${i + 1}. 🧾 ${c.ticket.restaurant}`, ...ticketLines(c.ticket), `Pay here: ${c.ticket.checkoutUrl}`].join("\n");
     const p = c.place;
     const facts = [
       p?.open === true && "Open now",
