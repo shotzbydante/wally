@@ -14,7 +14,9 @@ export async function GET(request: Request) {
   if (!token || given.length !== token.length || !timingSafeEqual(given, Buffer.from(token))) return new Response("Not found", { status: 404 });
   if (!key) return Response.json({ probe: "MEALME_API_KEY is not set in this deployment" });
 
-  const path = url.searchParams.get("path") ?? "";
+  // Short names for long ids, so test addresses stay short.
+  const short: Record<string, string> = { poke: "cashapp_eyJicmFuZE5hbWUiOiJQb2tlIEJhciBMb3MgQW5nZWxlcyIsImFkZHJlc3MiOiI1MjczIFcgT2x5bXBpYyBCbHZkIn0" };
+  const path = (url.searchParams.get("path") ?? "").replace(/\{(\w+)\}/g, (m, k: string) => short[k] ?? m);
   if (!path.startsWith("/api/")) return Response.json({ probe: "path must start with /api/" }, { status: 400 });
   const body = url.searchParams.get("body");
   const max = Number(url.searchParams.get("max")) || 7000;
@@ -22,7 +24,7 @@ export async function GET(request: Request) {
     const res = await fetch(`https://mealmeai.vercel.app${path}`, {
       method: body === null ? "GET" : "POST",
       headers: { Authorization: `Bearer ${key}`, ...(body === null ? {} : { "Content-Type": "application/json" }) },
-      ...(body === null ? {} : { body }),
+      ...(body === null ? {} : { body: body.replace(/\{(\w+)\}/g, (m, k: string) => short[k] ?? m) }),
       cache: "no-store",
       signal: AbortSignal.timeout(20_000),
     });
