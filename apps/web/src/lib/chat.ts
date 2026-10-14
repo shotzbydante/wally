@@ -209,11 +209,14 @@ export function splitSources(content: string): { text: string; sources: Source[]
  * are searches, not the restaurant's own page there: no app offers a
  * sanctioned way to look that up, and Wally doesn't scrape them (rule 8).
  */
-export function deliveryLinks(name: string): { app: string; url: string }[] {
+export function deliveryLinks(name: string, website?: string | null): { app: string; url: string }[] {
   const q = encodeURIComponent(name);
+  // A listing whose own website is its page on the app: use that page. Neither app offers a lookup, and rule 8 rules out finding one any other way.
+  const host = hostOf(website ?? "");
+  const listed = (app: string) => (host === app || host.endsWith(`.${app}`)) && /\/store\//.test(website ?? "") ? website! : undefined;
   return [
-    { app: "DoorDash", url: `https://www.doordash.com/search/store/${q}/` },
-    { app: "Uber Eats", url: `https://www.ubereats.com/search?q=${q}` },
+    { app: "DoorDash", url: listed("doordash.com") ?? `https://www.doordash.com/search/store/${q}/` },
+    { app: "Uber Eats", url: listed("ubereats.com") ?? `https://www.ubereats.com/search?q=${q}` },
   ];
 }
 
