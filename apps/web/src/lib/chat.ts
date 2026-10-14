@@ -53,6 +53,8 @@ export interface PlaceInfo {
   website?: string;
   /** The place on Google Maps. */
   maps: string;
+  /** Wally can build a pickup order here (see "Ordering" in CLAUDE.md). */
+  orders?: boolean;
 }
 
 /** A web page Wally drew on for an answer. */
@@ -88,7 +90,7 @@ export const MAX_MESSAGE_CHARS = 2000;
 export function asPlainText(message: Pick<ChatMessage, "content" | "choices">): string {
   const list = (message.choices ?? []).map((c, i) => {
     if (c.ticket) return `${i + 1}. Order at ${c.ticket.restaurant}: ${ticketLines(c.ticket).join("; ")} ${c.ticket.checkoutUrl}`;
-    const facts = [c.place?.miles !== undefined && `${c.place.miles} mi`, c.place?.open === true && "open", c.place?.open === false && "closed"].filter(Boolean);
+    const facts = [c.place?.miles !== undefined && `${c.place.miles} mi`, c.place?.open === true && "open", c.place?.open === false && "closed", c.place?.orders && "order with Wally"].filter(Boolean);
     const link = c.place?.website ?? c.place?.maps ?? c.url;
     return `${i + 1}. ${c.title}${facts.length ? ` (${facts.join(", ")})` : ""}${c.detail ? `: ${c.detail}` : ""}${link ? ` ${link}` : ""}`;
   });
@@ -139,6 +141,7 @@ export function asTexts(message: Pick<ChatMessage, "content" | "choices">, origi
       p?.miles !== undefined && `${p.miles} mi`,
       p?.rating !== undefined && `★ ${p.rating.toFixed(1)}`,
       p?.price,
+      p?.orders && "🧾 Order with Wally",
     ].filter(Boolean);
     const site = p ? p.website : c.url;
     const links = site ? [tidyLink(site)] : p ? textDeliveryLinks(c.title, origin).map((l) => `${l.app}: ${l.url}`) : [];

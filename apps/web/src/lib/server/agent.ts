@@ -1,7 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { CURRENT_LOCATION, asPlainText, cityOf, hostOf, isOwnSite, withSources, type ChatMessage, type Choice, type Source } from "@/lib/chat";
 import type { Channel } from "./conversation";
-import { MealMeError, checkout, mealmeConfigured, searchMenu, searchStores, zipOf, type MenuItem, type Store } from "./mealme";
+import { MealMeError, checkout, mealmeConfigured, nameMatches, sameStore, searchMenu, searchStores, zipOf, type MenuItem, type Store } from "./mealme";
 import { PlacesError, milesBetween, placesConfigured, searchPlaces, type Place, type Point } from "./places";
 
 /**
@@ -51,6 +51,7 @@ const FINDING_WITH_PLACES = `# Finding places
 - Say only what find_places told you about a place. Never add an address, hours, price, dish, menu item or review from memory. You don't know what any place has on its menu or in stock today, so never say a dish or cake is available.
 - When the person asks to see more, call find_places again with the same query, then show the next four that are not marked already_shown. If everything is already_shown, try one different wording of the query. If there is still nothing new, say that's everything nearby and offer to widen the search. The intro for these can be shorter, but is still required.
 - Give the person real choice. Look past the obvious names: neighborhood and independent places belong beside the well-known ones. When two places fit equally well, pick the independent one with its own site (own_site in the results) over a chain.
+- can_order marks places where you can build the order yourself (the card shows an "Order with Wally" badge). When one fits what the person asked for as well as the others, and is as close and as open, put it first and say the order can be placed right here. Never choose a can_order place over a better fit, a closer one, or one that is open when it is closed; ordering is a tiebreaker, not the point.
 - Each card links to the restaurant's own site first, then to delivery apps. When someone asks how to order from a place, point them to its own site first and mention the apps as the alternative.
 - If nothing fits, say so plainly and suggest widening the search.
 - You can't look up a restaurant's menu, dishes or booking rules. Point the person to the Website link on its card.`;
@@ -254,12 +255,7 @@ export function describeMenu(found: MenuFound): string {
 }
 
 /** Loose match between the name the person used and a store's listed name. */
-export function storeMatches(wanted: string, store: Store): boolean {
-  const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9 ]/g, " ").split(/\s+/).filter((w) => w.length > 2 && !["the", "and", "los", "angeles", "restaurant", "cafe", "kitchen", "bar", "grill"].includes(w));
-  const a = norm(wanted);
-  const b = norm(store.name);
-  return a.length > 0 && a.every((w) => b.some((x) => x.startsWith(w) || w.startsWith(x)));
-}
+export const storeMatches = (wanted: string, store: Store) => nameMatches(wanted, store.name);
 
 function searchTool(guest: Guest): Anthropic.WebSearchTool20250305 {
   return {
@@ -354,8 +350,8 @@ export function readWeb(blocks: Anthropic.ContentBlock[]): { cited: Source[]; fo
   return { cited, found };
 }
 
-/** A place found this turn, with its distance from the saved address, and whether an earlier answer already showed it. */
-export type FoundPlace = Place & { miles?: number; shown?: boolean };
+/** A place found this turn, with its distance from the saved address, whether an earlier answer already showed it, and whether Wally can order there. */
+export type FoundPlace = Place & { miles?: number; shown?: boolean; orders?: boolean };
 
 /** Google's ids of the places already shown on cards in this conversation, so "see more" brings new ones. */
 export function shownPlaces(thread: ChatMessage[]): Set<string> {
@@ -386,6 +382,7 @@ export function describePlaces(found: ReadonlyMap<string, FoundPlace>, ids: stri
       own_site: isOwnSite(p.website) || undefined,
       address: p.address || undefined,
       already_shown: p.shown || undefined,
+      can_order: p.orders || undefined,
     };
   });
   return rows.length ? JSON.stringify(rows) : "No places matched. Tell the person plainly and offer to widen the search.";
@@ -421,6 +418,7 @@ export function placeChoices(input: unknown, found: ReadonlyMap<string, FoundPla
         ...(place.price ? { price: place.price } : {}),
         ...(place.website ? { website: place.website } : {}),
         maps: place.maps,
+        ...(place.orders ? { orders: true } : {}),
       },
     });
   }
@@ -474,6 +472,14 @@ export async function reply(thread: ChatMessage[], guest: Guest, channel: Channe
   const shown = shownPlaces(thread);
   const canOrder = mealmeConfigured() && Boolean(guest.id);
   let menu: MenuFound | null = null;
+  /** The stores that take orders near the person, looked up once per turn and only when a place search needs them. */
+  let orderable: Promise<Store[]> | null = null;
+  const orderableStores = () => {
+    const zip = zipOf(guest.address) ?? guest.zip;
+    if (!canOrder || !zip) return Promise.resolve([] as Store[]);
+    orderable ??= searchStores(zip, 20).catch(() => [] as Store[]);
+    return orderable;
+  };
   let placeSearches = 0;
   let text = "";
   // A search or a card sits between two stretches of prose: start a new paragraph after it.
@@ -496,10 +502,12 @@ export async function reply(thread: ChatMessage[], guest: Guest, channel: Channe
     }
     if (++placeSearches > MAX_PLACE_SEARCHES) return { content: "No more searches for this message. Answer with what you have.", is_error: true };
     try {
-      const places = await searchPlaces({ query, area: area || undefined, near: guest.near, openNow: args.open_now === true });
+      // Places near the saved address are checked against the restaurants Wally can order from (not a named area elsewhere).
+      const [places, stores] = await Promise.all([searchPlaces({ query, area: area || undefined, near: guest.near, openNow: args.open_now === true }), area ? [] : orderableStores()]);
       const ids = places.map((place) => {
         const id = `p${found.size + 1}`;
-        found.set(id, { ...place, ...(guest.near && place.point ? { miles: milesBetween(guest.near, place.point) } : {}), ...(shown.has(place.id) ? { shown: true } : {}) });
+        const orders = stores.some((store) => sameStore(place, store));
+        found.set(id, { ...place, ...(guest.near && place.point ? { miles: milesBetween(guest.near, place.point) } : {}), ...(shown.has(place.id) ? { shown: true } : {}), ...(orders ? { orders: true } : {}) });
         return id;
       });
       return { content: describePlaces(found, ids, guest.timeZone) };
