@@ -518,7 +518,7 @@ function PlaceFacts({ place, fresh }: { place: NonNullable<Choice["place"]>; fre
       )}
       {place.price && <span>{place.price}</span>}
       {place.orders && (
-        <span className="inline-flex items-center gap-1 text-green-deep" title="Wally can build your pickup order here">
+        <span className="inline-flex h-5 items-center gap-1 rounded-full bg-mint-wash pr-2 pl-1 text-[0.74rem] text-green-deep" title="Wally can build your pickup order here">
           <svg viewBox="0 0 16 16" className="size-[0.95rem]" aria-hidden="true">
             <circle cx="8" cy="8" r="8" fill="currentColor" />
             <path d="M4.6 8.3l2.2 2.2 4.6-4.8" fill="none" stroke="#fff" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" />
