@@ -114,7 +114,7 @@ const cents = (p: { amount?: number; amountCents?: number } | undefined) => p?.a
 
 /** Restaurants that take orders through Square, near a ZIP code. */
 export async function searchStores(zip: string, limit = 10): Promise<Store[]> {
-  const q = new URLSearchParams({ providerId: "square", merchantType: "restaurant", zipCode: zip, radiusInMiles: "6", limit: String(limit) });
+  const q = new URLSearchParams({ providerId: "square", merchantType: "restaurant", zipCode: zip, radiusInMiles: "8", limit: String(limit) });
   const data = await call<{ stores?: { providerLocationId: string; name: string; address?: string; raw?: { distanceMiles?: number; isOpen?: boolean } }[] }>(`/api/stores/search?${q}`);
   return (data.stores ?? []).map((s) => ({
     id: s.providerLocationId,

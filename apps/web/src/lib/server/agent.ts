@@ -51,7 +51,8 @@ const FINDING_WITH_PLACES = `# Finding places
 - Say only what find_places told you about a place. Never add an address, hours, price, dish, menu item or review from memory. You don't know what any place has on its menu or in stock today, so never say a dish or cake is available.
 - When the person asks to see more, call find_places again with the same query, then show the next four that are not marked already_shown. If everything is already_shown, try one different wording of the query. If there is still nothing new, say that's everything nearby and offer to widen the search. The intro for these can be shorter, but is still required.
 - Give the person real choice. Look past the obvious names: neighborhood and independent places belong beside the well-known ones. When two places fit equally well, pick the independent one with its own site (own_site in the results) over a chain.
-- can_order marks places where you can build the order yourself (the card shows an "Order with Wally" badge). When one fits what the person asked for as well as the others, and is as close and as open, put it first and say the order can be placed right here. Never choose a can_order place over a better fit, a closer one, or one that is open when it is closed; ordering is a tiebreaker, not the point.
+- can_order marks places where you can build the order yourself (the card shows an "Order with Wally" check). A can_order place that fits the ask goes on a card, even if a closer or better-rated one takes its place in the first spot; never leave one out in favor of a similar place that lacks it. Prefer a can_order place for the top spot when it fits as well and is as close and as open; never over a better fit, a much closer one, or an open one when it is closed.
+- When the person asks what they can order from, or for a cuisine they can order from ("mexican spots you can order from"): for a cuisine, call find_places for it and show every can_order match first, then fill the four with the best others. For no cuisine, call find_orderable_places and show all of its ids. Either way the intro says plainly which cards you can order from right here, and that the rest are ordered through the chips on their card (the restaurant's own site or a delivery app). If no can_order place fits, say so in one line and still show the best others.
 - Each card links to the restaurant's own site first, then to delivery apps. When someone asks how to order from a place, point them to its own site first and mention the apps as the alternative.
 - If nothing fits, say so plainly and suggest widening the search.
 - You can't look up a restaurant's menu, dishes or booking rules. Point the person to the Website link on its card.`;
@@ -67,7 +68,7 @@ const FINDING_WITH_WEB = `# Finding places
 
 const ORDERING = `# Ordering (restaurants that take orders through Square)
 - You can build a pickup order at some restaurants and hand the person a page to pay on. The person pays the restaurant directly; you never take payment.
-- When someone asks which places you can order from, what's orderable nearby, or where to order right now, call find_orderable_places, then show_places with its ids (all of them, up to 8) and an intro saying these are the places where you can build their pickup order right here.
+- find_orderable_places lists the nearest restaurants where you can build a pickup order, with no cuisine filter; show all of its ids with show_places. For a cuisine, use find_places instead and read can_order.
 - When someone wants to order something, call find_menu with the restaurant's name and the dish in their words. It tells you whether the place takes orders this way, and lists matching menu items with their prices and the choices each one needs (a base, a protein, a size).
 - If the place doesn't take orders this way, say so in one line and point them to its own site or the delivery apps on its card. Never pretend to order anywhere else.
 - Before building the order, you must know every required choice. Ask for the ones the person hasn't given, in one message, offering the options by name. Don't guess a protein or a base.
@@ -211,6 +212,9 @@ const FIND_MENU_TOOL: Anthropic.Tool = {
     required: ["restaurant", "dish"],
   },
 };
+
+/** How many orderable stores are fetched for one turn: the list has no cuisine filter, so it has to be wide enough that a cuisine search can find its matches in it. */
+const STORES_PER_TURN = 80;
 
 /** How many orderable places are looked up for one answer: each is a Places search. */
 const MAX_ORDERABLE = 8;
@@ -504,7 +508,7 @@ export async function reply(thread: ChatMessage[], guest: Guest, channel: Channe
     if (!canOrder) return [] as Store[];
     const zip = await orderingZip(told);
     if (!zip) return [] as Store[];
-    orderable ??= searchStores(zip, 20).catch(() => [] as Store[]);
+    orderable ??= searchStores(zip, STORES_PER_TURN).catch(() => [] as Store[]);
     return orderable;
   };
   let placeSearches = 0;
@@ -589,7 +593,7 @@ export async function reply(thread: ChatMessage[], guest: Guest, channel: Channe
     if (!restaurant || !dish) return { content: "Give the restaurant and the dish.", is_error: true };
     if (!zip) return { content: "You need a 5-digit ZIP to find restaurants that take orders. Ask the person for theirs in one short line.", is_error: true };
     try {
-      const stores = await searchStores(zip, 20);
+      const stores = await searchStores(zip, STORES_PER_TURN);
       const store = stores.find((s) => storeMatches(restaurant, s));
       if (!store) {
         const names = stores.slice(0, 6).map((s) => s.name);
