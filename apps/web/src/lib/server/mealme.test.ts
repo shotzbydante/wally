@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { dollars, ticketLines, asPlainText, asTexts } from "@/lib/chat";
-import { describeMenu, storeMatches, type MenuFound } from "./agent";
+import { describeMenu, storeMatches, storeNamedFor, type MenuFound } from "./agent";
 import { checkout, sameStore, searchMenu, searchStores, zipOf, type MenuItem, type Store } from "./mealme";
 
 afterEach(() => {
@@ -47,6 +47,13 @@ describe("mealme", () => {
     expect(await searchStores("90036", 80, 8)).toEqual([store]);
     expect(calls.map((c) => /radiusInMiles=(\d+)&limit=(\d+)/.exec(c.url)!.slice(1).join("/"))).toEqual(["8/80", "6/40", "6/20"]);
     await expect(searchStores("90036", 20)).rejects.toThrow();
+  });
+  it("knows when a store is named for what was searched", () => {
+    expect(storeNamedFor(store, "poke restaurants near me")).toBe(true);
+    expect(storeNamedFor(store, "Poke")).toBe(true);
+    expect(storeNamedFor({ name: "Taco Bar" }, "tacos")).toBe(true);
+    expect(storeNamedFor(store, "best spots open late")).toBe(false);
+    expect(storeNamedFor(store, "sushi")).toBe(false);
   });
   it("reads a menu item with its required choices", async () => {
     mealme([{ body: { items: [{ providerItemId: "CALI_1", title: "Small Poke Bowl", description: "Build your bowl.", price: { amount: 1549 }, fulfillment: ["PICKUP"], raw: { unitToken: "LCS", menuItemVariationId: "CALIV_1", variations: [{ id: "CALIV_1", name: "Regular" }], requiredModifierLists: [{ id: "L1", name: "Base Choice", minSelection: 1, maxSelection: 2, options: [{ id: "M1", name: "White Rice", price: { amount: 0 } }, { id: "M2", name: "Brown Rice", price: { amount: 0 } }] }, { id: "L2", name: "Protein", minSelection: 1, maxSelection: 1, options: [{ id: "M3", name: "Salmon", price: { amount: 0 } }, { id: "M4", name: "Tuna", price: { amount: 150 } }] }] } }, { providerItemId: "x", title: "No tokens" }] } }]);

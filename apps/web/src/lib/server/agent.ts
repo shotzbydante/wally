@@ -216,6 +216,23 @@ const FIND_MENU_TOOL: Anthropic.Tool = {
 /** How many orderable stores are fetched for one turn: the list has no cuisine filter, so it has to be wide enough that a cuisine search can find its matches in it. */
 const STORES_PER_TURN = 80;
 
+/** How many orderable stores named for the search are added to a place search that missed them, each a Places lookup. */
+const MAX_NAMED_ORDERABLE = 3;
+
+/** Words in a search that say nothing about the food, so a store name is never matched on them. */
+const FILLER = new Set(["near", "nearby", "spot", "spots", "place", "places", "restaurant", "restaurants", "food", "best", "good", "open", "late", "night", "delivery", "pickup", "takeout", "cheap", "around", "here", "order", "from", "with", "wally"]);
+
+/** True when the store's name carries a word of the search: "Poke Bar Los Angeles" for "poke restaurants". */
+export function storeNamedFor(store: { name: string }, query: string): boolean {
+  const stem = (w: string) => w.replace(/s$/, "");
+  const words = new Set(store.name.toLowerCase().split(/[^a-z0-9]+/).map(stem));
+  return query
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter((w) => w.length >= 4 && !FILLER.has(w))
+    .some((w) => words.has(stem(w)));
+}
+
 /** How many orderable places are looked up for one answer: each is a Places search. */
 const MAX_ORDERABLE = 8;
 
@@ -522,39 +539,13 @@ export async function reply(thread: ChatMessage[], guest: Guest, channel: Channe
     listener.onText(chunk);
   };
 
-  /** Runs one find_places call and returns what Claude should be told. */
-  const findPlaces = async (input: unknown): Promise<{ content: string; is_error?: boolean }> => {
-    const args = (input ?? {}) as { query?: unknown; area?: unknown; open_now?: unknown };
-    const query = clip(args.query, 120);
-    const area = clip(args.area, 80);
-    if (!query) return { content: "Give a query.", is_error: true };
-    if (!guest.near && !area) {
-      return { content: "There is no saved address and no area was given. Ask the person to add their address in the bar at the top of the page, or to name a neighborhood, city or ZIP.", is_error: true };
-    }
-    if (++placeSearches > MAX_PLACE_SEARCHES) return { content: "No more searches for this message. Answer with what you have.", is_error: true };
-    try {
-      // Places near the saved address are checked against the restaurants Wally can order from (not a named area elsewhere).
-      const [places, stores] = await Promise.all([searchPlaces({ query, area: area || undefined, near: guest.near, openNow: args.open_now === true }), area ? [] : orderableStores()]);
-      const ids = places.map((place) => {
-        const id = `p${found.size + 1}`;
-        const orders = stores.some((store) => sameStore(place, store));
-        found.set(id, { ...place, ...(guest.near && place.point ? { miles: milesBetween(guest.near, place.point) } : {}), ...(shown.has(place.id) ? { shown: true } : {}), ...(orders ? { orders: true } : {}) });
-        return id;
-      });
-      return { content: describePlaces(found, ids, guest.timeZone) };
-    } catch (error) {
-      if (!(error instanceof PlacesError)) throw error;
-      return { content: "The places search isn't responding. Tell the person plainly that you couldn't look it up just now.", is_error: true };
-    }
-  };
-
   /**
    * The stores Wally can order from, as places for cards: each is looked up in
    * Google Places by name and address so its card carries the same site, rating
    * and Maps link as any other. One not found there still gets a plain card.
    */
-  const orderablePlaces = async (stores: Store[]): Promise<string[]> => {
-    const picked = [...stores].sort((a, b) => Number(b.open ?? true) - Number(a.open ?? true) || (a.miles ?? Infinity) - (b.miles ?? Infinity)).slice(0, MAX_ORDERABLE);
+  const orderablePlaces = async (stores: Store[], max = MAX_ORDERABLE): Promise<string[]> => {
+    const picked = [...stores].sort((a, b) => Number(b.open ?? true) - Number(a.open ?? true) || (a.miles ?? Infinity) - (b.miles ?? Infinity)).slice(0, max);
     const matches = await Promise.all(
       picked.map(async (store) => {
         if (!placesConfigured()) return null;
@@ -582,6 +573,35 @@ export async function reply(thread: ChatMessage[], guest: Guest, channel: Channe
       found.set(place.id, { ...place, ...(miles !== undefined ? { miles } : {}), ...(shown.has(place.id) ? { shown: true } : {}), orders: true });
       return place.id;
     });
+  };
+
+  /** Runs one find_places call and returns what Claude should be told. */
+  const findPlaces = async (input: unknown): Promise<{ content: string; is_error?: boolean }> => {
+    const args = (input ?? {}) as { query?: unknown; area?: unknown; open_now?: unknown };
+    const query = clip(args.query, 120);
+    const area = clip(args.area, 80);
+    if (!query) return { content: "Give a query.", is_error: true };
+    if (!guest.near && !area) {
+      return { content: "There is no saved address and no area was given. Ask the person to add their address in the bar at the top of the page, or to name a neighborhood, city or ZIP.", is_error: true };
+    }
+    if (++placeSearches > MAX_PLACE_SEARCHES) return { content: "No more searches for this message. Answer with what you have.", is_error: true };
+    try {
+      // Places near the saved address are checked against the restaurants Wally can order from (not a named area elsewhere).
+      const [places, stores] = await Promise.all([searchPlaces({ query, area: area || undefined, near: guest.near, openNow: args.open_now === true }), area ? [] : orderableStores()]);
+      const ids = places.map((place) => {
+        const id = `p${found.size + 1}`;
+        const orders = stores.some((store) => sameStore(place, store));
+        found.set(id, { ...place, ...(guest.near && place.point ? { miles: milesBetween(guest.near, place.point) } : {}), ...(shown.has(place.id) ? { shown: true } : {}), ...(orders ? { orders: true } : {}) });
+        return id;
+      });
+      // An orderable store named for what was asked ("Poke Bar" for "poke") belongs in the answer even when Google's twenty left it out.
+      const missed = stores.filter((store) => storeNamedFor(store, query) && !places.some((place) => sameStore(place, store)));
+      ids.push(...(await orderablePlaces(missed, MAX_NAMED_ORDERABLE)));
+      return { content: describePlaces(found, ids, guest.timeZone) };
+    } catch (error) {
+      if (!(error instanceof PlacesError)) throw error;
+      return { content: "The places search isn't responding. Tell the person plainly that you couldn't look it up just now.", is_error: true };
+    }
   };
 
   /** Runs one find_menu call: find the store by name near the person's ZIP, then search its menu. */
