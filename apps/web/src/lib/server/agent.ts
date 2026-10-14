@@ -69,6 +69,8 @@ const FINDING_WITH_WEB = `# Finding places
 const ORDERING = `# Ordering (restaurants that take orders through Square)
 - You can build a pickup order at some restaurants and hand the person a page to pay on. The person pays the restaurant directly; you never take payment.
 - find_orderable_places lists the nearest restaurants where you can build a pickup order, with no cuisine filter; show all of its ids with show_places. For a cuisine, use find_places instead and read can_order.
+- Never ask for a ZIP when they have a saved address or are sharing their location: ordering works from it on its own. Ask for a ZIP only if a tool result tells you to.
+- When someone says "Order from <place>" without a dish, ask in one short line what they'd like there; you have no menu until find_menu runs with a dish.
 - When someone wants to order something, call find_menu with the restaurant's name and the dish in their words. It tells you whether the place takes orders this way, and lists matching menu items with their prices and the choices each one needs (a base, a protein, a size).
 - If the place doesn't take orders this way, say so in one line and point them to its own site or the delivery apps on its card. Never pretend to order anywhere else.
 - Before building the order, you must know every required choice. Ask for the ones the person hasn't given, in one message, offering the options by name. Don't guess a protein or a base.
@@ -207,7 +209,7 @@ const FIND_MENU_TOOL: Anthropic.Tool = {
     properties: {
       restaurant: { type: "string", description: "The restaurant's name, as the person said it or as it appears on a place card." },
       dish: { type: "string", description: "What they want, in a few words: 'poke bowl', 'pepperoni pizza', 'latte'." },
-      zip: { type: "string", description: "A 5-digit ZIP the person named. Only when the guest notes give no ZIP." },
+      zip: { type: "string", description: "A 5-digit ZIP the person typed in this conversation. Leave it out when they have a saved address or are sharing their location; the search works from that." },
     },
     required: ["restaurant", "dish"],
   },
@@ -307,7 +309,7 @@ function guestNotes(guest: Guest, channel: Channel, now: Date): string {
   lines.push(guest.name ? `- First name: ${guest.name}.` : "- You don't know their name yet.");
   if (guest.near) {
     const where = guest.address === CURRENT_LOCATION ? "They are sharing their current location" : cityOf(guest.address) ? `Their saved address is in ${cityOf(guest.address)}` : "They have a saved address";
-    lines.push(`- ${where}. find_places searches around it automatically, and "near me" means there; you don't need to ask where they are.`);
+    lines.push(`- ${where}. find_places searches around it automatically, ordering works from it too, and "near me" means there; you don't need to ask where they are or for a ZIP.`);
     lines.push("- This can change between messages. Places from earlier in the conversation may be from somewhere else entirely: search afresh every time, never reuse them, and never pass area because of them.");
   }
   else lines.push(guest.zip ? `- Home ZIP code: ${guest.zip}. No saved address yet.` : "- They have no saved address, and you don't know where they are yet.");
