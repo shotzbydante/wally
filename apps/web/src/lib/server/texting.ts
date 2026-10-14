@@ -258,7 +258,7 @@ export async function handleInbound(inbound: Inbound, origin: string): Promise<v
     }
     showTyping(provider, from);
     try {
-      const answer = await reply(begun.messages, { name: account.name, zip: account.zip, near: account.near, address: account.address }, "text", { onText: () => {} });
+      const answer = await reply(begun.messages, { id: account.id, name: account.name, zip: account.zip, near: account.near, address: account.address }, "text", { onText: () => {} });
       const saved = await saveReply(account.id, "text", answer.content, answer.choices);
       if (saved) {
         // Options always end with a link to the website. That it is the same conversation is said

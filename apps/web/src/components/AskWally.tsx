@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type CS
 import { LocationBar } from "@/components/LocationBar";
 import { Wally } from "@/components/Wally";
 import { WallyFace, type WallyLook } from "@/components/WallyFace";
-import { MAX_MESSAGE_CHARS, OPEN_BADGE_MINUTES, deliveryLinks, hostOf, isOwnSite, splitSources, type ChatEvent, type ChatMessage, type Choice } from "@/lib/chat";
+import { MAX_MESSAGE_CHARS, OPEN_BADGE_MINUTES, deliveryLinks, dollars, hostOf, isOwnSite, splitSources, type ChatEvent, type ChatMessage, type Choice, type TicketInfo } from "@/lib/chat";
 
 /** What Wally is doing, which drives how he moves and what his bubble says. */
 type Mood = "idle" | "thinking" | "speaking" | "sorry";
@@ -430,7 +430,7 @@ export function AskWally({
             </button>
           </form>
           <p className="mt-1.5 text-center text-[0.72rem] leading-snug text-ink-soft min-[900px]:mt-2 min-[900px]:text-[0.85rem]">
-            Wally is an AI. He can’t place orders or book tables yet. Confirm hours and prices with the restaurant.
+            Wally is an AI. You pay restaurants on their own pages; he can’t book tables yet. Confirm hours and prices with the restaurant.
           </p>
         </div>
 
@@ -441,6 +441,59 @@ export function AskWally({
       </section>
     </main>
     </>
+  );
+}
+
+/**
+ * An order ready to pay, laid out like a restaurant check. Every figure is the
+ * restaurant's own; the person pays on its checkout page, never here.
+ */
+function Ticket({ ticket: t, live }: { ticket: TicketInfo; live: boolean }) {
+  const row = (label: string, value: string, strong = false) => (
+    <div className={`flex justify-between gap-3 ${strong ? "font-bold" : "text-ink-soft"}`}>
+      <span>{label}</span>
+      <span className="tabular-nums">{value}</span>
+    </div>
+  );
+  return (
+    <div className={`card mt-2 max-w-[22rem] overflow-hidden rounded-2xl bg-pad ring-1 ring-line ring-inset ${live ? "arrive" : "opacity-80"}`}>
+      <div className="px-4 pt-3.5 pb-3">
+        <p className="text-[0.75rem] font-semibold tracking-[0.12em] text-ink-soft uppercase">Pickup order</p>
+        <p className="mt-0.5 font-display text-[1.15rem] leading-tight font-bold">{t.restaurant}</p>
+        {t.address && <p className="text-[0.85rem] text-ink-soft">{t.address}</p>}
+      </div>
+      <div className="mx-4 border-t border-dashed border-line" />
+      <div className="space-y-1 px-4 py-3 text-[0.95rem]">
+        <div className="flex justify-between gap-3">
+          <span className="min-w-0">
+            <span className="font-semibold">
+              {t.quantity} × {t.item}
+              {t.variation && t.variation !== "Regular" ? ` (${t.variation})` : ""}
+            </span>
+            {t.modifiers.length > 0 && <span className="block text-[0.85rem] leading-snug text-ink-soft">{t.modifiers.join(", ")}</span>}
+          </span>
+          <span className="tabular-nums">{dollars(t.subtotal)}</span>
+        </div>
+      </div>
+      <div className="mx-4 border-t border-dashed border-line" />
+      <div className="space-y-1 px-4 py-3 text-[0.95rem]">
+        {row("Subtotal", dollars(t.subtotal))}
+        {row("Tax", dollars(t.tax))}
+        {row("Total", dollars(t.total), true)}
+      </div>
+      <div className="px-4 pb-4">
+        <a
+          href={t.checkoutUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className={`press fill-green flex h-11 items-center justify-center rounded-xl bg-green font-semibold text-white hover:brightness-110 ${live ? "" : "pointer-events-none opacity-60"}`}
+        >
+          Pay {dollars(t.total)} on the restaurant’s page
+          <span className="sr-only"> (opens in a new tab)</span>
+        </a>
+        <p className="mt-2 text-center text-[0.78rem] leading-snug text-ink-soft">Nothing is charged until you pay there. Wally never sees your card.</p>
+      </div>
+    </div>
   );
 }
 
@@ -548,7 +601,8 @@ function WallyTurn({
           {byText && <ByText />}
         </p>
       )}
-      {choices && (
+      {choices?.some((c) => c.ticket) && choices.map((c, i) => c.ticket && <Ticket key={i} ticket={c.ticket} live={live} />)}
+      {choices && !choices.some((c) => c.ticket) && (
         <ul className={`mt-2 grid gap-1.5 ${places ? "" : "sm:grid-cols-2"}`}>
           {choices.map((c, i) => (
             <li
