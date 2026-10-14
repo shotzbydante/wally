@@ -527,15 +527,22 @@ const CHIP = {
   plain: "bg-paper ring-1 ring-line ring-inset hover:bg-mint-wash hover:ring-mint/60",
 };
 
-/** The mark in a card's corner for a place where Wally can build the order. */
+/**
+ * The mark after a place's name when Wally can build the order there: a
+ * scalloped seal in vest navy, so it reads as a credential and not as one
+ * more green chip.
+ */
 function OrderCheck() {
   return (
-    <span className="inline-flex text-green" title="Wally can build your pickup order here">
-      <svg viewBox="0 0 16 16" className="size-[1.05rem]" aria-hidden="true">
-        <circle cx="8" cy="8" r="8" fill="currentColor" />
-        <path d="M4.6 8.3l2.2 2.2 4.6-4.8" fill="none" stroke="#fff" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" />
+    <span className="ml-1.5 inline-flex align-[-0.18em] text-ink" title="Wally can build your pickup order here">
+      <svg viewBox="0 0 20 20" className="size-[1.05rem]" aria-hidden="true">
+        <path
+          d="M10 1.2l1.9 1.5 2.4-.4.9 2.3 2.2 1-.4 2.4 1.5 1.9-1.5 1.9.4 2.4-2.2 1-.9 2.3-2.4-.4L10 18.8l-1.9-1.5-2.4.4-.9-2.3-2.2-1 .4-2.4L1.5 10 3 8.1l-.4-2.4 2.2-1 .9-2.3 2.4.4z"
+          fill="currentColor"
+        />
+        <path d="M6.3 10.3l2.5 2.5 5-5.2" fill="none" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
       </svg>
-      <span className="sr-only">Order with Wally</span>
+      <span className="sr-only"> (Order with Wally)</span>
     </span>
   );
 }
@@ -633,15 +640,13 @@ function WallyTurn({
                 <Tile>{c.emoji}</Tile>
                 <span className="min-w-0 flex-1">
                   <span className="flex items-baseline gap-2">
-                    <span className="line-clamp-2 min-w-0 flex-1 leading-[1.3] font-semibold">{c.title}</span>
-                    {(c.place?.orders || c.place?.miles !== undefined) && (
-                      <span className="flex shrink-0 items-center gap-1.5 text-[0.8rem] font-semibold text-ink-soft tabular-nums">
-                        {c.place.orders && <OrderCheck />}
-                        {c.place.miles !== undefined && (
-                          <span>
-                            {c.place.miles} mi<span className="sr-only"> away</span>
-                          </span>
-                        )}
+                    <span className="line-clamp-2 min-w-0 flex-1 leading-[1.3] font-semibold">
+                      {c.title}
+                      {c.place?.orders && <OrderCheck />}
+                    </span>
+                    {c.place?.miles !== undefined && (
+                      <span className="shrink-0 text-[0.8rem] font-semibold text-ink-soft tabular-nums">
+                        {c.place.miles} mi<span className="sr-only"> away</span>
                       </span>
                     )}
                   </span>
