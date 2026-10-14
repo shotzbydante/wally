@@ -153,4 +153,10 @@ describe("deliveryLinks", () => {
       { app: "Uber Eats", url: "https://www.ubereats.com/search?q=Joe's%20Pizza%20%26%20Pasta" },
     ]);
   });
+  it("uses the listing's own page on an app when its website is that page", () => {
+    expect(deliveryLinks("Bamboo Chinese", "https://www.doordash.com/store/bamboo-chinese-los-angeles-12345/")[0]!.url).toBe("https://www.doordash.com/store/bamboo-chinese-los-angeles-12345/");
+    expect(deliveryLinks("Bamboo Chinese", "https://www.doordash.com/store/bamboo-chinese-los-angeles-12345/")[1]!.url).toContain("ubereats.com/search");
+    expect(deliveryLinks("Bamboo Chinese", "https://www.doordash.com/")[0]!.url).toContain("/search/store/");
+    expect(deliveryLinks("Bamboo Chinese", "https://bamboochinese.com")[0]!.url).toContain("/search/store/");
+  });
 });
