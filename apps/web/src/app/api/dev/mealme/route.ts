@@ -1,36 +1,66 @@
 import { timingSafeEqual } from "node:crypto";
 
 /**
- * TEMPORARY. Passes one request through to MealMe so its real response
- * shapes can be seen while the connector is built. Guarded by
- * WALLY_PROBE_TOKEN; without that variable it doesn't exist. Remove this
- * file and the variable once the connector is in.
+ * TEMPORARY. Runs a fixed sequence against MealMe (cart, item, checkout)
+ * so the real response shapes can be seen while the connector is built.
+ * Guarded by WALLY_PROBE_TOKEN; without it this route answers 404.
+ * Remove this file and the variable once the connector is in.
  */
+const BASE = "https://mealmeai.vercel.app";
+const POKE = "cashapp_eyJicmFuZE5hbWUiOiJQb2tlIEJhciBMb3MgQW5nZWxlcyIsImFkZHJlc3MiOiI1MjczIFcgT2x5bXBpYyBCbHZkIn0";
+
 export async function GET(request: Request) {
   const token = process.env.WALLY_PROBE_TOKEN?.trim();
   const key = process.env.MEALME_API_KEY?.trim();
   const url = new URL(request.url);
   const given = Buffer.from(url.searchParams.get("token") ?? "");
   if (!token || given.length !== token.length || !timingSafeEqual(given, Buffer.from(token))) return new Response("Not found", { status: 404 });
-  if (!key) return Response.json({ probe: "MEALME_API_KEY is not set in this deployment" });
+  if (!key) return Response.json({ probe: "no key" });
 
-  // Short names for long ids, so test addresses stay short.
-  const short: Record<string, string> = { poke: "cashapp_eyJicmFuZE5hbWUiOiJQb2tlIEJhciBMb3MgQW5nZWxlcyIsImFkZHJlc3MiOiI1MjczIFcgT2x5bXBpYyBCbHZkIn0" };
-  const path = (url.searchParams.get("path") ?? "").replace(/\{(\w+)\}/g, (m, k: string) => short[k] ?? m);
-  if (!path.startsWith("/api/")) return Response.json({ probe: "path must start with /api/" }, { status: 400 });
-  const body = url.searchParams.get("body");
-  const max = Number(url.searchParams.get("max")) || 7000;
-  try {
-    const res = await fetch(`https://mealmeai.vercel.app${path}`, {
-      method: body === null ? "GET" : "POST",
-      headers: { Authorization: `Bearer ${key}`, ...(body === null ? {} : { "Content-Type": "application/json" }) },
-      ...(body === null ? {} : { body: body.replace(/\{(\w+)\}/g, (m, k: string) => short[k] ?? m) }),
+  const call = async (path: string, body?: unknown) => {
+    const res = await fetch(`${BASE}${path}`, {
+      method: body === undefined ? "GET" : "POST",
+      headers: { Authorization: `Bearer ${key}`, ...(body === undefined ? {} : { "Content-Type": "application/json" }) },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
       cache: "no-store",
-      signal: AbortSignal.timeout(20_000),
+      signal: AbortSignal.timeout(25_000),
     });
     const text = await res.text();
-    return Response.json({ status: res.status, length: text.length, body: text.slice(0, max) }, { headers: { "Cache-Control": "no-store" } });
+    let json: unknown = text;
+    try {
+      json = JSON.parse(text);
+    } catch {}
+    return { status: res.status, body: json };
+  };
+
+  const step = url.searchParams.get("step") ?? "cart";
+  const out: Record<string, unknown> = {};
+  try {
+    if (step === "cart") {
+      const cart = await call("/api/carts", { providerId: "square", externalCustomerId: "probe-2", locationId: POKE });
+      out.cart = cart;
+      const cartId = (cart.body as { cartId?: string })?.cartId;
+      if (!cartId) return Response.json(out);
+      const mods = ["CALIM_CAESGEdYMklaTUs1VktQVzRTT0dVSEtLWkE3Uw", "CALIM_CAESGDQ3NlFFQkwzS0ZZSjUzTVhIQ1VUUVpZVA", "CALIM_CAESGFdGVjJOSEM2WUxJM0s1UFNZVkpPVjI2Sw"];
+      out.item = await call(`/api/carts/${cartId}/items`, {
+        providerItemId: "CALI_CAESGE1VSlNLUzZMNVdWRE9aUkpaVkFJM0tCRw",
+        quantity: 1,
+        externalCustomerId: "probe-2",
+        modifiers: mods.map((modifierId) => ({ modifierId, quantity: 1 })),
+      });
+      out.get = await call(`/api/carts/${cartId}`);
+      out.checkout = await call(`/api/carts/${cartId}/checkout`, {
+        unitToken: "LCSHCZHWTZPCC",
+        menuItemId: "CALI_CAESGE1VSlNLUzZMNVdWRE9aUkpaVkFJM0tCRw",
+        menuItemVariationId: "CALIV_CAESGFQyN1RSWkhJRE5HNEtIUUhBRTdZNTVEVQ",
+        modifiers: mods.map((modifierId) => ({ modifierId, quantity: 1 })),
+        quantity: 1,
+      });
+    } else if (step === "list") {
+      out.list = await call("/api/carts?externalCustomerId=probe-2");
+    }
   } catch (error) {
-    return Response.json({ probe: "no response", error: error instanceof Error ? error.name : "unknown" });
+    out.error = error instanceof Error ? error.name : "unknown";
   }
+  return Response.json(out, { headers: { "Cache-Control": "no-store" } });
 }
