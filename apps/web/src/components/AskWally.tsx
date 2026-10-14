@@ -500,7 +500,7 @@ function Ticket({ ticket: t, live }: { ticket: TicketInfo; live: boolean }) {
 /** Open or closed, rating and price: the facts about a place, from the listing, on one line. */
 function PlaceFacts({ place, fresh }: { place: NonNullable<Choice["place"]>; fresh: boolean }) {
   const open = fresh ? place.open : undefined;
-  if (open === undefined && place.rating === undefined && !place.price && !place.orders) return null;
+  if (open === undefined && place.rating === undefined && !place.price) return null;
   return (
     <span className="flex items-center gap-2 text-[0.8rem] leading-[1.15rem] font-semibold text-ink-soft">
       {open !== undefined && (
@@ -517,15 +517,25 @@ function PlaceFacts({ place, fresh }: { place: NonNullable<Choice["place"]>; fre
         </span>
       )}
       {place.price && <span>{place.price}</span>}
-      {place.orders && (
-        <span className="inline-flex h-5 items-center gap-1 rounded-full bg-mint-wash pr-2 pl-1 text-[0.74rem] text-green-deep" title="Wally can build your pickup order here">
-          <svg viewBox="0 0 16 16" className="size-[0.95rem]" aria-hidden="true">
-            <circle cx="8" cy="8" r="8" fill="currentColor" />
-            <path d="M4.6 8.3l2.2 2.2 4.6-4.8" fill="none" stroke="#fff" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-          Order with Wally
-        </span>
-      )}
+    </span>
+  );
+}
+
+/** The chips under a place card: the one that leads glows, the rest sit plain. */
+const CHIP = {
+  lead: "chip-lead ring-1 ring-mint/50 ring-inset hover:ring-green",
+  plain: "bg-paper ring-1 ring-line ring-inset hover:bg-mint-wash hover:ring-mint/60",
+};
+
+/** The mark in a card's corner for a place where Wally can build the order. */
+function OrderCheck() {
+  return (
+    <span className="inline-flex text-green" title="Wally can build your pickup order here">
+      <svg viewBox="0 0 16 16" className="size-[1.05rem]" aria-hidden="true">
+        <circle cx="8" cy="8" r="8" fill="currentColor" />
+        <path d="M4.6 8.3l2.2 2.2 4.6-4.8" fill="none" stroke="#fff" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+      <span className="sr-only">Order with Wally</span>
     </span>
   );
 }
@@ -624,9 +634,14 @@ function WallyTurn({
                 <span className="min-w-0 flex-1">
                   <span className="flex items-baseline gap-2">
                     <span className="line-clamp-2 min-w-0 flex-1 leading-[1.3] font-semibold">{c.title}</span>
-                    {c.place?.miles !== undefined && (
-                      <span className="shrink-0 text-[0.8rem] font-semibold text-ink-soft tabular-nums">
-                        {c.place.miles} mi<span className="sr-only"> away</span>
+                    {(c.place?.orders || c.place?.miles !== undefined) && (
+                      <span className="flex shrink-0 items-center gap-1.5 text-[0.8rem] font-semibold text-ink-soft tabular-nums">
+                        {c.place.orders && <OrderCheck />}
+                        {c.place.miles !== undefined && (
+                          <span>
+                            {c.place.miles} mi<span className="sr-only"> away</span>
+                          </span>
+                        )}
                       </span>
                     )}
                   </span>
@@ -636,19 +651,18 @@ function WallyTurn({
               </button>
               {c.place && (
                 <p className="flex flex-wrap items-center gap-1.5 px-2.5 pb-2 text-[0.8rem] font-semibold text-green-deep">
+                  {/* Ordering here leads when Wally can build the order; otherwise the restaurant's own site does. */}
+                  {c.place.orders && (
+                    <button type="button" disabled={!live} onClick={() => onPick?.({ ...c, reply: `Order from ${c.title}` })} className={`press inline-flex h-7 items-center rounded-full px-2.5 transition-colors ${CHIP.lead}`}>
+                      Order with Wally<span className="sr-only"> from {c.title}</span>
+                    </button>
+                  )}
                   {[
-                    // The restaurant's own site leads, and stands out from the apps beside it.
-                    ...(c.place.website ? [isOwnSite(c.place.website) ? { label: "Their own site", url: c.place.website, lead: true } : { label: "Website", url: c.place.website }] : []),
-                    ...deliveryLinks(c.title).map((d) => ({ label: d.app, url: d.url })),
-                    { label: "Map", url: c.place.maps },
+                    ...(c.place.website ? [{ label: "Website", url: c.place.website, lead: !c.place.orders && isOwnSite(c.place.website) }] : []),
+                    ...deliveryLinks(c.title).map((d) => ({ label: d.app, url: d.url, lead: false })),
+                    { label: "Map", url: c.place.maps, lead: false },
                   ].map((link) => (
-                    <a
-                      key={link.label}
-                      href={link.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className={`inline-flex h-7 items-center rounded-full px-2.5 transition-colors ${"lead" in link ? "chip-lead ring-1 ring-mint/50 ring-inset hover:ring-green" : "bg-paper ring-1 ring-line ring-inset hover:bg-mint-wash hover:ring-mint/60"}`}
-                    >
+                    <a key={link.label} href={link.url} target="_blank" rel="noopener noreferrer" className={`inline-flex h-7 items-center rounded-full px-2.5 transition-colors ${link.lead ? CHIP.lead : CHIP.plain}`}>
                       {link.label}
                       <span className="sr-only"> for {c.title} (opens in a new tab)</span>
                     </a>
