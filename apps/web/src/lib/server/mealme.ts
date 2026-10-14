@@ -202,6 +202,30 @@ export async function checkout(store: Store, item: MenuItem, modifierIds: string
   };
 }
 
+/** Words in a name that don't tell one place from another. */
+const FILLER = new Set(["the", "and", "los", "angeles", "restaurant", "cafe", "kitchen", "bar", "grill", "inc", "llc"]);
+const words = (s: string) => s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9 ]/g, " ").split(/\s+/).filter((w) => w.length > 2 && !FILLER.has(w));
+
+/** Loose match between a name a person used and a store's listed name. */
+export function nameMatches(wanted: string, listed: string): boolean {
+  const a = words(wanted);
+  const b = words(listed);
+  return a.length > 0 && a.every((w) => b.some((x) => x.startsWith(w) || w.startsWith(x)));
+}
+
+/**
+ * Whether a place found elsewhere (name and street address) is one of these
+ * stores. Names must match loosely both ways, and the street numbers must
+ * agree when both are known, so two branches of a chain aren't confused.
+ */
+export function sameStore(place: { name: string; address: string }, store: Store): boolean {
+  const number = (s: string) => /^\s*(\d+)/.exec(s)?.[1];
+  const n1 = number(place.address);
+  const n2 = number(store.address);
+  if (n1 && n2 && n1 !== n2) return false;
+  return nameMatches(place.name, store.name) || nameMatches(store.name, place.name);
+}
+
 /** The ZIP in a saved address, if it has one. */
 export function zipOf(address: string | null | undefined): string | undefined {
   return /\b(\d{5})(?:-\d{4})?\b(?!.*\b\d{5}\b)/.exec(address ?? "")?.[1];

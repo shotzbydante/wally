@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { dollars, ticketLines, asPlainText, asTexts } from "@/lib/chat";
 import { describeMenu, storeMatches, type MenuFound } from "./agent";
-import { checkout, searchMenu, searchStores, zipOf, type MenuItem, type Store } from "./mealme";
+import { checkout, sameStore, searchMenu, searchStores, zipOf, type MenuItem, type Store } from "./mealme";
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -69,6 +69,12 @@ describe("ordering in the agent", () => {
     expect(storeMatches("Sushi Gen", store)).toBe(false);
     expect(storeMatches("the", store)).toBe(false);
   });
+  it("recognises a Google place as a store that takes orders, by name and street number", () => {
+    expect(sameStore({ name: "Poke Bar", address: "5273 W Olympic Blvd, Los Angeles" }, store)).toBe(true);
+    expect(sameStore({ name: "Poke Bar Los Angeles", address: "" }, store)).toBe(true);
+    expect(sameStore({ name: "Poke Bar", address: "9000 Sunset Blvd" }, store)).toBe(false);
+    expect(sameStore({ name: "Sushi Gen", address: "5273 W Olympic Blvd" }, store)).toBe(false);
+  });
   it("tells Claude the menu with short ids for items and options", () => {
     const found: MenuFound = { store, items: new Map([["m1", bowl]]), options: new Map([["o1", { itemId: "m1", listId: "L1", optionId: "M1" }], ["o2", { itemId: "m1", listId: "L1", optionId: "M2" }], ["o3", { itemId: "m1", listId: "L2", optionId: "M3" }], ["o4", { itemId: "m1", listId: "L2", optionId: "M4" }]]) };
     const told = JSON.parse(describeMenu(found));
@@ -84,6 +90,9 @@ describe("ordering in the agent", () => {
     const ticket = { restaurant: "Poke Bar Los Angeles", address: "5273 W Olympic Blvd", item: "Small Poke Bowl", variation: "Regular", modifiers: ["White Rice", "Salmon"], quantity: 1, subtotal: 1549, tax: 159, total: 1708, checkoutUrl: "https://cash.app/$poke/checkout/C1" };
     expect(dollars(1708)).toBe("$17.08");
     expect(ticketLines(ticket)[0]).toBe("1 × Small Poke Bowl with White Rice, Salmon");
+    const placeCard = { emoji: "🍣", title: "Poke Bar", detail: "", reply: "x", place: { id: "g1", maps: "https://maps.example", miles: 0.7, orders: true } };
+    expect(asPlainText({ content: "", choices: [placeCard] })).toContain("(0.7 mi, order with Wally)");
+    expect(asTexts({ content: "Hi", choices: [placeCard] }, "https://www.wallywaiter.com")[1]).toContain("🧾 Order with Wally");
     const message = { content: "Here you go.", choices: [{ emoji: "🧾", title: "Order at Poke Bar Los Angeles", detail: "", reply: "x", ticket }] };
     expect(asPlainText(message)).toContain("1. Order at Poke Bar Los Angeles: 1 × Small Poke Bowl with White Rice, Salmon; Subtotal $15.49; Tax $1.59; Total $17.08");
     const texts = asTexts(message, "https://www.wallywaiter.com");

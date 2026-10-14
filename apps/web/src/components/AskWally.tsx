@@ -500,7 +500,7 @@ function Ticket({ ticket: t, live }: { ticket: TicketInfo; live: boolean }) {
 /** Open or closed, rating and price: the facts about a place, from the listing, on one line. */
 function PlaceFacts({ place, fresh }: { place: NonNullable<Choice["place"]>; fresh: boolean }) {
   const open = fresh ? place.open : undefined;
-  if (open === undefined && place.rating === undefined && !place.price) return null;
+  if (open === undefined && place.rating === undefined && !place.price && !place.orders) return null;
   return (
     <span className="flex items-center gap-2 text-[0.8rem] leading-[1.15rem] font-semibold text-ink-soft">
       {open !== undefined && (
@@ -517,6 +517,11 @@ function PlaceFacts({ place, fresh }: { place: NonNullable<Choice["place"]>; fre
         </span>
       )}
       {place.price && <span>{place.price}</span>}
+      {place.orders && (
+        <span className="chip-lead inline-flex h-5 items-center gap-1 rounded-full px-2 text-[0.72rem] font-semibold text-green-deep ring-1 ring-mint/50 ring-inset">
+          <span aria-hidden="true">🧾</span>Order with Wally
+        </span>
+      )}
     </span>
   );
 }
