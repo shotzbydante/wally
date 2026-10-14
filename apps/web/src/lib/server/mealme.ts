@@ -112,9 +112,22 @@ async function call<T>(path: string, body?: unknown): Promise<T> {
 
 const cents = (p: { amount?: number; amountCents?: number } | undefined) => p?.amountCents ?? p?.amount ?? 0;
 
-/** Restaurants that take orders through Square, near a ZIP code. */
-export async function searchStores(zip: string, limit = 10): Promise<Store[]> {
-  const q = new URLSearchParams({ providerId: "square", merchantType: "restaurant", zipCode: zip, radiusInMiles: "8", limit: String(limit) });
+/**
+ * Restaurants that take orders through Square, near a ZIP code. MealMe's
+ * server fails (500) on a wide search, so a big ask steps down to a smaller
+ * one rather than coming back empty.
+ */
+export async function searchStores(zip: string, limit = 10, radius = 6): Promise<Store[]> {
+  try {
+    return await storesPage(zip, limit, radius);
+  } catch (error) {
+    if (!(error instanceof MealMeError) || error.status < 500 || limit <= 20) throw error;
+    return searchStores(zip, Math.max(20, Math.floor(limit / 2)), Math.min(radius, 6));
+  }
+}
+
+async function storesPage(zip: string, limit: number, radius: number): Promise<Store[]> {
+  const q = new URLSearchParams({ providerId: "square", merchantType: "restaurant", zipCode: zip, radiusInMiles: String(radius), limit: String(limit) });
   const data = await call<{ stores?: { providerLocationId: string; name: string; address?: string; raw?: { distanceMiles?: number; isOpen?: boolean } }[] }>(`/api/stores/search?${q}`);
   return (data.stores ?? []).map((s) => ({
     id: s.providerLocationId,

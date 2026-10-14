@@ -508,7 +508,7 @@ export async function reply(thread: ChatMessage[], guest: Guest, channel: Channe
     if (!canOrder) return [] as Store[];
     const zip = await orderingZip(told);
     if (!zip) return [] as Store[];
-    orderable ??= searchStores(zip, STORES_PER_TURN).catch(() => [] as Store[]);
+    orderable ??= searchStores(zip, STORES_PER_TURN, 8).catch(() => [] as Store[]);
     return orderable;
   };
   let placeSearches = 0;
@@ -593,7 +593,7 @@ export async function reply(thread: ChatMessage[], guest: Guest, channel: Channe
     if (!restaurant || !dish) return { content: "Give the restaurant and the dish.", is_error: true };
     if (!zip) return { content: "You need a 5-digit ZIP to find restaurants that take orders. Ask the person for theirs in one short line.", is_error: true };
     try {
-      const stores = await searchStores(zip, STORES_PER_TURN);
+      const stores = await searchStores(zip, STORES_PER_TURN, 8);
       const store = stores.find((s) => storeMatches(restaurant, s));
       if (!store) {
         const names = stores.slice(0, 6).map((s) => s.name);

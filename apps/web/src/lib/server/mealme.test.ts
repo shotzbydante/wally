@@ -41,6 +41,13 @@ describe("mealme", () => {
     expect(await searchStores("90036")).toEqual([store]);
     expect(calls[0]!.url).toContain("/api/stores/search?providerId=square&merchantType=restaurant&zipCode=90036");
   });
+  it("steps a wide store search down when MealMe fails on it", async () => {
+    const raw = { providerLocationId: "cashapp_abc", name: "Poke Bar Los Angeles", address: "5273 W Olympic Blvd", raw: { distanceMiles: 0.7, isOpen: true } };
+    const calls = mealme([{ status: 500, body: { message: "boom" } }, { status: 500, body: { message: "boom" } }, { body: { stores: [raw] } }]);
+    expect(await searchStores("90036", 80, 8)).toEqual([store]);
+    expect(calls.map((c) => /radiusInMiles=(\d+)&limit=(\d+)/.exec(c.url)!.slice(1).join("/"))).toEqual(["8/80", "6/40", "6/20"]);
+    await expect(searchStores("90036", 20)).rejects.toThrow();
+  });
   it("reads a menu item with its required choices", async () => {
     mealme([{ body: { items: [{ providerItemId: "CALI_1", title: "Small Poke Bowl", description: "Build your bowl.", price: { amount: 1549 }, fulfillment: ["PICKUP"], raw: { unitToken: "LCS", menuItemVariationId: "CALIV_1", variations: [{ id: "CALIV_1", name: "Regular" }], requiredModifierLists: [{ id: "L1", name: "Base Choice", minSelection: 1, maxSelection: 2, options: [{ id: "M1", name: "White Rice", price: { amount: 0 } }, { id: "M2", name: "Brown Rice", price: { amount: 0 } }] }, { id: "L2", name: "Protein", minSelection: 1, maxSelection: 1, options: [{ id: "M3", name: "Salmon", price: { amount: 0 } }, { id: "M4", name: "Tuna", price: { amount: 150 } }] }] } }, { providerItemId: "x", title: "No tokens" }] } }]);
     expect(await searchMenu("cashapp_abc", "bowl")).toEqual([bowl]);
