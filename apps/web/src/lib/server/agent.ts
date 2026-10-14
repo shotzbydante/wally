@@ -67,7 +67,7 @@ const FINDING_WITH_WEB = `# Finding places
 
 const ORDERING = `# Ordering (restaurants that take orders through Square)
 - You can build a pickup order at some restaurants and hand the person a page to pay on. The person pays the restaurant directly; you never take payment.
-- When someone asks which places you can order from, what's orderable nearby, or where to order right now, call show_orderable_places. It shows the nearby restaurants that take orders as cards, nearest first, with an intro in your voice. They are pickup orders; say so when it matters.
+- When someone asks which places you can order from, what's orderable nearby, or where to order right now, call find_orderable_places, then show_places with its ids (all of them, up to 8) and an intro saying these are the places where you can build their pickup order right here.
 - When someone wants to order something, call find_menu with the restaurant's name and the dish in their words. It tells you whether the place takes orders this way, and lists matching menu items with their prices and the choices each one needs (a base, a protein, a size).
 - If the place doesn't take orders this way, say so in one line and point them to its own site or the delivery apps on its card. Never pretend to order anywhere else.
 - Before building the order, you must know every required choice. Ask for the ones the person hasn't given, in one message, offering the options by name. Don't guess a protein or a base.
@@ -212,16 +212,17 @@ const FIND_MENU_TOOL: Anthropic.Tool = {
   },
 };
 
+/** How many orderable places are looked up for one answer: each is a Places search. */
+const MAX_ORDERABLE = 8;
+
 const ORDERABLE_PLACES_TOOL: Anthropic.Tool = {
-  name: "show_orderable_places",
-  description: "Shows the restaurants near the person where you can build a pickup order, as cards (nearest first, open first). Use it when they ask what you can order from. Call it once and end your turn with it.",
+  name: "find_orderable_places",
+  description: "Finds the restaurants near the person where you can build a pickup order, nearest first. Use it when they ask what you can order from, then call show_places with the ids it returns.",
   input_schema: {
     type: "object",
     properties: {
-      intro: { type: "string", description: "One or two sentences under 35 words, in Wally's voice, shown above the cards. Say these are places where the order can be built right here, for pickup." },
       zip: { type: "string", description: "Their 5-digit ZIP, only if they told you one in this conversation. Leave it out when they have a saved address or location." },
     },
-    required: ["intro"],
   },
 };
 
@@ -240,26 +241,6 @@ const ORDER_TICKET_TOOL: Anthropic.Tool = {
     required: ["item", "options", "quantity", "line"],
   },
 };
-
-/** Cards for the stores Wally can order from, nearest first with open ones ahead. */
-export function orderableChoices(stores: Store[], max = 8): Choice[] {
-  return [...stores]
-    .sort((a, b) => Number(b.open ?? true) - Number(a.open ?? true) || (a.miles ?? Infinity) - (b.miles ?? Infinity))
-    .slice(0, max)
-    .map((s) => ({
-      emoji: "🧾",
-      title: s.name.slice(0, 60),
-      detail: s.address ? `Pickup from ${s.address}` : "Pickup",
-      reply: `Order from ${s.name}`.slice(0, 120),
-      place: {
-        id: `mealme:${s.id}`,
-        ...(s.miles !== undefined ? { miles: s.miles } : {}),
-        ...(s.open !== undefined ? { open: s.open } : {}),
-        maps: `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${s.name} ${s.address}`.trim())}`,
-        orders: true,
-      },
-    }));
-}
 
 /** The menu items find_menu returned this turn, by the short ids Claude quotes back. */
 export interface MenuFound {
@@ -563,6 +544,42 @@ export async function reply(thread: ChatMessage[], guest: Guest, channel: Channe
     }
   };
 
+  /**
+   * The stores Wally can order from, as places for cards: each is looked up in
+   * Google Places by name and address so its card carries the same site, rating
+   * and Maps link as any other. One not found there still gets a plain card.
+   */
+  const orderablePlaces = async (stores: Store[]): Promise<string[]> => {
+    const picked = [...stores].sort((a, b) => Number(b.open ?? true) - Number(a.open ?? true) || (a.miles ?? Infinity) - (b.miles ?? Infinity)).slice(0, MAX_ORDERABLE);
+    const matches = await Promise.all(
+      picked.map(async (store) => {
+        if (!placesConfigured()) return null;
+        const places = await searchPlaces({ query: `${store.name} ${store.address}`.trim(), near: guest.near, limit: 3 }).catch(() => [] as Place[]);
+        return places.find((p) => sameStore(p, store)) ?? null;
+      }),
+    );
+    return picked.map((store, i) => {
+      const place: Place = matches[i] ?? {
+        id: `mealme:${store.id}`,
+        name: store.name,
+        address: store.address,
+        kind: "",
+        summary: null,
+        point: null,
+        open: store.open ?? null,
+        closes: null,
+        rating: null,
+        ratings: null,
+        price: null,
+        website: null,
+        maps: `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${store.name} ${store.address}`.trim())}`,
+      };
+      const miles = guest.near && place.point ? milesBetween(guest.near, place.point) : store.miles;
+      found.set(place.id, { ...place, ...(miles !== undefined ? { miles } : {}), ...(shown.has(place.id) ? { shown: true } : {}), orders: true });
+      return place.id;
+    });
+  };
+
   /** Runs one find_menu call: find the store by name near the person's ZIP, then search its menu. */
   const findMenu = async (input: unknown): Promise<{ content: string; is_error?: boolean }> => {
     const args = (input ?? {}) as { restaurant?: unknown; dish?: unknown; zip?: unknown };
@@ -635,7 +652,7 @@ export async function reply(thread: ChatMessage[], guest: Guest, channel: Channe
         ],
         // Places come from the places search when it is on. Web search is only the fallback
         // without it, so review and listing sites never appear beside real place cards.
-        tools: [...(hasPlaces ? [FIND_PLACES_TOOL, SHOW_PLACES_TOOL] : [searchTool(guest)]), ...(canOrder ? [FIND_MENU_TOOL, ORDER_TICKET_TOOL, ORDERABLE_PLACES_TOOL] : []), CHOICES_TOOL],
+        tools: [...(hasPlaces ? [FIND_PLACES_TOOL, SHOW_PLACES_TOOL] : [searchTool(guest)]), ...(canOrder ? [FIND_MENU_TOOL, ORDER_TICKET_TOOL, ...(hasPlaces ? [ORDERABLE_PLACES_TOOL] : [])] : []), CHOICES_TOOL],
         // One tool at a time: a search has to finish before options are shown.
         tool_choice: { type: "auto", disable_parallel_tool_use: true },
         messages,
@@ -681,9 +698,9 @@ export async function reply(thread: ChatMessage[], guest: Guest, channel: Channe
           answer({ content: "No restaurants near their ZIP take orders through Wally yet. Say so plainly, and offer to find places another way.", is_error: true });
           continue;
         }
-        choices = orderableChoices(stores);
-        if (!text.trim()) write(clip((tool.input as { intro?: unknown })?.intro, 300) || "Here's where I can build your order for pickup.");
-        break;
+        const ids = await orderablePlaces(stores);
+        answer({ content: describePlaces(found, ids, guest.timeZone) });
+        continue;
       }
       if (tool.name === ORDER_TICKET_TOOL.name) {
         const built = await orderTicket(tool.input);

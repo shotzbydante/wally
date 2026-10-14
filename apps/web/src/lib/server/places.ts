@@ -209,6 +209,8 @@ export interface PlaceSearch {
   /** A neighbourhood, city or ZIP the person named, searched instead of `near`. */
   area?: string;
   openNow?: boolean;
+  /** Fewer results than a full page, for a lookup of one named place. */
+  limit?: number;
 }
 
 /** Food and drink places matching the search, in Google's order. */
@@ -217,7 +219,7 @@ export async function searchPlaces(search: PlaceSearch): Promise<Place[]> {
   const raw = await searchText(
     {
       textQuery: area ? `${withoutNearMe(search.query)} near ${area}` : withoutNearMe(search.query),
-      pageSize: PAGE_SIZE,
+      pageSize: search.limit ?? PAGE_SIZE,
       ...(search.openNow ? { openNow: true } : {}),
       ...(!area && search.near ? { locationRestriction: boxAround(search.near) } : {}),
     },

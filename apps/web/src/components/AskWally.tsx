@@ -518,8 +518,12 @@ function PlaceFacts({ place, fresh }: { place: NonNullable<Choice["place"]>; fre
       )}
       {place.price && <span>{place.price}</span>}
       {place.orders && (
-        <span className="chip-lead inline-flex h-5 items-center gap-1 rounded-full px-2 text-[0.72rem] font-semibold text-green-deep ring-1 ring-mint/50 ring-inset">
-          <span aria-hidden="true">🧾</span>Order with Wally
+        <span className="inline-flex items-center gap-1 text-green-deep" title="Wally can build your pickup order here">
+          <svg viewBox="0 0 16 16" className="size-[0.95rem]" aria-hidden="true">
+            <circle cx="8" cy="8" r="8" fill="currentColor" />
+            <path d="M4.6 8.3l2.2 2.2 4.6-4.8" fill="none" stroke="#fff" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+          Order with Wally
         </span>
       )}
     </span>
