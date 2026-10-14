@@ -56,6 +56,16 @@ export async function GET(request: Request) {
         modifiers: mods.map((modifierId) => ({ modifierId, quantity: 1 })),
         quantity: 1,
       });
+    } else if (step === "two") {
+      const cart = await call("/api/carts", { providerId: "square", externalCustomerId: "probe-3", locationId: POKE });
+      const cartId = (cart.body as { cartId?: string })?.cartId;
+      if (!cartId) return Response.json({ cart });
+      const mods = ["CALIM_CAESGEdYMklaTUs1VktQVzRTT0dVSEtLWkE3Uw", "CALIM_CAESGDQ3NlFFQkwzS0ZZSjUzTVhIQ1VUUVpZVA", "CALIM_CAESGFdGVjJOSEM2WUxJM0s1UFNZVkpPVjI2Sw"].map((modifierId) => ({ modifierId, quantity: 1 }));
+      out.a = await call(`/api/carts/${cartId}/items`, { providerItemId: "CALI_CAESGE1VSlNLUzZMNVdWRE9aUkpaVkFJM0tCRw", quantity: 1, externalCustomerId: "probe-3", modifiers: mods });
+      out.b = await call(`/api/carts/${cartId}/items`, { providerItemId: "CALI_CAESGE1VSlNLUzZMNVdWRE9aUkpaVkFJM0tCRw", quantity: 2, externalCustomerId: "probe-3", modifiers: mods });
+      // Checkout with an items array, and without a body, to see which the API honours.
+      out.checkoutItems = await call(`/api/carts/${cartId}/checkout`, { items: [{ unitToken: "LCSHCZHWTZPCC", menuItemId: "CALI_CAESGE1VSlNLUzZMNVdWRE9aUkpaVkFJM0tCRw", menuItemVariationId: "CALIV_CAESGFQyN1RSWkhJRE5HNEtIUUhBRTdZNTVEVQ", modifiers: mods, quantity: 1 }, { unitToken: "LCSHCZHWTZPCC", menuItemId: "CALI_CAESGFRHUzJRV01RRlFCQTNMSE5OUTNJWEhXRw", menuItemVariationId: "CALIV_CAESGFNPT1lOUTNLRFJWVTNVU0xFTERaWUFYSA", modifiers: mods, quantity: 1 }] });
+      out.checkoutEmpty = await call(`/api/carts/${cartId}/checkout`, {});
     } else if (step === "list") {
       out.list = await call("/api/carts?externalCustomerId=probe-2");
     }
