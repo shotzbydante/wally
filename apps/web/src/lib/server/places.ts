@@ -106,6 +106,18 @@ const httpsUrl = (value: string | undefined): string | null => {
 };
 
 /** Turns a typed address into Google's spelling of it and its coordinates. Null if Google can't place it. */
+/** The 5-digit ZIP a point sits in, by Google's Geocoding API; nothing stored. */
+export async function zipAt(point: Point): Promise<string | undefined> {
+  const key = process.env.GOOGLE_MAPS_API_KEY?.trim();
+  if (!key) return undefined;
+  const q = new URLSearchParams({ latlng: `${point.lat},${point.lng}`, result_type: "postal_code", key });
+  const res = await fetch(`https://maps.googleapis.com/maps/api/geocode/json?${q}`);
+  if (!res.ok) return undefined;
+  const data = (await res.json()) as { results?: { address_components?: { types?: string[]; short_name?: string }[] }[] };
+  for (const r of data.results ?? []) for (const c of r.address_components ?? []) if (c.types?.includes("postal_code") && /^\d{5}$/.test(c.short_name ?? "")) return c.short_name;
+  return undefined;
+}
+
 export async function findAddress(typed: string): Promise<{ address: string; point: Point } | null> {
   const [first] = await searchText({ textQuery: typed, pageSize: 1 }, ["formattedAddress", "location"]);
   const point = first && pointOf(first);

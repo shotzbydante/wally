@@ -2,7 +2,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { CURRENT_LOCATION, asPlainText, cityOf, hostOf, isOwnSite, withSources, type ChatMessage, type Choice, type Source } from "@/lib/chat";
 import type { Channel } from "./conversation";
 import { MealMeError, checkout, mealmeConfigured, nameMatches, sameStore, searchMenu, searchStores, zipOf, type MenuItem, type Store } from "./mealme";
-import { PlacesError, milesBetween, placesConfigured, searchPlaces, type Place, type Point } from "./places";
+import { PlacesError, milesBetween, placesConfigured, searchPlaces, zipAt, type Place, type Point } from "./places";
 
 /**
  * Wally's brain: one function that reads a thread and answers it with
@@ -219,7 +219,7 @@ const ORDERABLE_PLACES_TOOL: Anthropic.Tool = {
     type: "object",
     properties: {
       intro: { type: "string", description: "One or two sentences under 35 words, in Wally's voice, shown above the cards. Say these are places where the order can be built right here, for pickup." },
-      dish: { type: "string", description: "Optional: a kind of food the person mentioned, used only to pick an emoji per card." },
+      zip: { type: "string", description: "Their 5-digit ZIP, only if they told you one in this conversation. Leave it out when they have a saved address or location." },
     },
     required: ["intro"],
   },
@@ -508,9 +508,21 @@ export async function reply(thread: ChatMessage[], guest: Guest, channel: Channe
   let menu: MenuFound | null = null;
   /** The stores that take orders near the person, looked up once per turn and only when a place search needs them. */
   let orderable: Promise<Store[]> | null = null;
-  const orderableStores = () => {
-    const zip = zipOf(guest.address) ?? guest.zip;
-    if (!canOrder || !zip) return Promise.resolve([] as Store[]);
+  /** The ZIP ordering works from: the saved address's, else the one under a shared location, else the account's, else one Claude was told. */
+  let zipFound: Promise<string | undefined> | null = null;
+  const orderingZip = (told?: unknown) => {
+    zipFound ??= (async () => {
+      const own = zipOf(guest.address);
+      if (own) return own;
+      if (guest.address === CURRENT_LOCATION && guest.near) return (await zipAt(guest.near).catch(() => undefined)) ?? guest.zip;
+      return guest.zip;
+    })();
+    return zipFound.then((z) => z ?? (/^\d{5}$/.test(clip(told, 5)) ? clip(told, 5) : undefined));
+  };
+  const orderableStores = async (told?: unknown) => {
+    if (!canOrder) return [] as Store[];
+    const zip = await orderingZip(told);
+    if (!zip) return [] as Store[];
     orderable ??= searchStores(zip, 20).catch(() => [] as Store[]);
     return orderable;
   };
@@ -556,7 +568,7 @@ export async function reply(thread: ChatMessage[], guest: Guest, channel: Channe
     const args = (input ?? {}) as { restaurant?: unknown; dish?: unknown; zip?: unknown };
     const restaurant = clip(args.restaurant, 80);
     const dish = clip(args.dish, 80);
-    const zip = zipOf(guest.address) ?? guest.zip ?? (/^\d{5}$/.test(clip(args.zip, 5)) ? clip(args.zip, 5) : undefined);
+    const zip = await orderingZip(args.zip);
     if (!restaurant || !dish) return { content: "Give the restaurant and the dish.", is_error: true };
     if (!zip) return { content: "You need a 5-digit ZIP to find restaurants that take orders. Ask the person for theirs in one short line.", is_error: true };
     try {
@@ -659,8 +671,9 @@ export async function reply(thread: ChatMessage[], guest: Guest, channel: Channe
         continue;
       }
       if (tool.name === ORDERABLE_PLACES_TOOL.name) {
-        const stores = await orderableStores();
-        if (!zipOf(guest.address) && !guest.zip) {
+        const told = (tool.input as { zip?: unknown })?.zip;
+        const stores = await orderableStores(told);
+        if (!(await orderingZip(told))) {
           answer({ content: "You need a 5-digit ZIP to list restaurants that take orders. Ask the person for theirs in one short line.", is_error: true });
           continue;
         }
