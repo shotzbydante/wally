@@ -9,12 +9,12 @@ afterEach(() => {
 });
 
 /** Answers the next Places request with `places` and records what was asked. */
-function google(places: unknown[], status = 200) {
+function google(places: unknown[], status = 200, routingSummaries?: unknown[]) {
   const calls: { headers: Record<string, string>; body: Record<string, unknown> }[] = [];
   vi.stubEnv("GOOGLE_MAPS_API_KEY", "key");
   vi.stubGlobal("fetch", async (_url: string, init: RequestInit) => {
     calls.push({ headers: init.headers as Record<string, string>, body: JSON.parse(init.body as string) });
-    return new Response(JSON.stringify(status === 200 ? { places } : { error: { message: "API not enabled" } }), { status });
+    return new Response(JSON.stringify(status === 200 ? { places, ...(routingSummaries ? { routingSummaries } : {}) } : { error: { message: "API not enabled" } }), { status });
   });
   vi.spyOn(console, "error").mockImplementation(() => {});
   return calls;
@@ -43,16 +43,34 @@ describe("findAddress", () => {
 });
 
 describe("searchPlaces", () => {
-  const raw = { id: "abc", displayName: { text: " Milk Bar " }, shortFormattedAddress: "7150 Melrose Ave", primaryTypeDisplayName: { text: "Dessert shop" }, editorialSummary: { text: " Playful bakery known for cereal milk soft serve. " }, location: { latitude: 34.08, longitude: -118.34 }, currentOpeningHours: { openNow: true, nextCloseTime: "2026-10-13T04:00:00Z" }, rating: 4.5, userRatingCount: 812, priceLevel: "PRICE_LEVEL_MODERATE", websiteUri: "https://milkbarstore.com/", googleMapsUri: "https://maps.google.com/?cid=1" };
+  const raw = { id: "abc", displayName: { text: " Milk Bar " }, shortFormattedAddress: "7150 Melrose Ave", primaryTypeDisplayName: { text: "Dessert shop" }, editorialSummary: { text: " Playful bakery known for cereal milk soft serve. " }, location: { latitude: 34.08, longitude: -118.34 }, currentOpeningHours: { openNow: true, nextCloseTime: "2026-10-13T04:00:00Z" }, rating: 4.5, userRatingCount: 812, priceLevel: "PRICE_LEVEL_MODERATE", websiteUri: "https://milkbarstore.com/", googleMapsUri: "https://maps.google.com/?cid=1", takeout: true, delivery: false, dineIn: true, timeZone: { id: "America/Los_Angeles" } };
+  const none = { takeout: null, delivery: null, dineIn: null, reservable: null, timeZone: null };
 
   it("leans toward the saved address and tidies what comes back", async () => {
     const calls = google([raw, { ...raw, id: "gone", businessStatus: "CLOSED_PERMANENTLY" }, { id: "bare", displayName: { text: "Bare" }, websiteUri: "javascript:alert(1)" }]);
     expect(await searchPlaces({ query: "dessert near me", near: home, openNow: true })).toEqual([
-      { id: "abc", name: "Milk Bar", address: "7150 Melrose Ave", kind: "Dessert shop", summary: "Playful bakery known for cereal milk soft serve.", point: { lat: 34.08, lng: -118.34 }, open: true, closes: "2026-10-13T04:00:00Z", rating: 4.5, ratings: 812, price: "$$", website: "https://milkbarstore.com/", maps: "https://maps.google.com/?cid=1" },
-      { id: "bare", name: "Bare", address: "", kind: "", summary: null, point: null, open: null, closes: null, rating: null, ratings: null, price: null, website: null, maps: "https://www.google.com/maps/place/?q=place_id:bare" },
+      { id: "abc", name: "Milk Bar", address: "7150 Melrose Ave", kind: "Dessert shop", summary: "Playful bakery known for cereal milk soft serve.", point: { lat: 34.08, lng: -118.34 }, open: true, closes: "2026-10-13T04:00:00Z", rating: 4.5, ratings: 812, price: "$$", website: "https://milkbarstore.com/", maps: "https://maps.google.com/?cid=1", takeout: true, delivery: false, dineIn: true, reservable: null, timeZone: "America/Los_Angeles" },
+      { id: "bare", name: "Bare", address: "", kind: "", summary: null, point: null, open: null, closes: null, rating: null, ratings: null, price: null, website: null, maps: "https://www.google.com/maps/place/?q=place_id:bare", ...none },
     ]);
     // Held to a box about 25 miles each way, so a bigger city far away can't answer.
     expect(calls[0]!.body).toEqual({ textQuery: "dessert", pageSize: 20, openNow: true, locationRestriction: { rectangle: { low: { latitude: 33.7016, longitude: -118.7966 }, high: { latitude: 34.4262, longitude: -117.9218 } } } });
+    // The service flags and time zone ride in the same billing tier; no routing was asked for.
+    expect(calls[0]!.headers["X-Goog-FieldMask"]).toMatch(/places\.takeout,places\.delivery,places\.dineIn,places\.reservable,places\.timeZone$/);
+  });
+  it("asks Google how long each place takes to reach, and keeps the answers in step with the places", async () => {
+    const calls = google(
+      [raw, { ...raw, id: "gone", businessStatus: "CLOSED_PERMANENTLY" }, { ...raw, id: "far" }, { ...raw, id: "unrouted" }],
+      200,
+      [{ legs: [{ duration: "597s", distanceMeters: 2607 }] }, { legs: [{ duration: "10s", distanceMeters: 10 }] }, { legs: [{ duration: "1501.5s", distanceMeters: 8046 }] }, {}],
+    );
+    const places = await searchPlaces({ query: "dessert", near: home, travel: { from: home, mode: "WALK" } });
+    expect(places.map((p) => [p.id, p.travel])).toEqual([
+      ["abc", { mode: "WALK", minutes: 10, miles: 1.6 }],
+      ["far", { mode: "WALK", minutes: 25, miles: 5 }],
+      ["unrouted", undefined],
+    ]);
+    expect(calls[0]!.body).toMatchObject({ routingParameters: { origin: { latitude: 34.0639, longitude: -118.3592 }, travelMode: "WALK" } });
+    expect(calls[0]!.headers["X-Goog-FieldMask"]).toMatch(/,routingSummaries$/);
   });
   it("searches a named area instead of the saved address", async () => {
     const calls = google([]);
@@ -119,7 +137,7 @@ describe("suggestAddresses", () => {
 });
 
 describe("place cards", () => {
-  const place = (id: string, name: string, open: boolean | null, miles?: number): FoundPlace => ({ id, name, address: "1 Main St", kind: "Bakery", summary: null, point: null, open, closes: null, rating: 4.5, ratings: 10, price: null, website: open ? `https://${id}.example/` : null, maps: `https://maps.example/${id}`, miles });
+  const place = (id: string, name: string, open: boolean | null, miles?: number): FoundPlace => ({ id, name, address: "1 Main St", kind: "Bakery", summary: null, point: null, open, closes: null, rating: 4.5, ratings: 10, price: null, website: open ? `https://${id}.example/` : null, maps: `https://maps.example/${id}`, takeout: null, delivery: null, dineIn: null, reservable: null, timeZone: null, miles });
   const found = new Map<string, FoundPlace>([
     ["p1", place("far", "Far Open", true, 3.2)],
     ["p2", place("closed", "Closed Close", false, 0.1)],
@@ -165,6 +183,23 @@ describe("place cards", () => {
     expect(placesIntro({}, cards)).toBe("I'd start with Carney's: 0.3 miles from Pantages Theatre, open now, rated 4.5. A few more worth a look are below.");
     // Near the saved address nothing is said about where from.
     expect(JSON.parse(describePlaces(found, ["p1"]))[0]).not.toHaveProperty("miles_from");
+  });
+  it("shows travel time on a card, sorts by it, and tells Claude what each place offers", () => {
+    const routed = new Map<string, FoundPlace>([
+      ["p1", { ...place("a", "Carney's", true, 0.3), from: "Pantages Theatre", travel: { mode: "WALK", minutes: 6, miles: 0.4 }, takeout: true, delivery: false, dineIn: true }],
+      ["p2", { ...place("b", "Mel's", true, 0.2), from: "Pantages Theatre", travel: { mode: "WALK", minutes: 9, miles: 0.5 }, reservable: true, timeZone: "America/Los_Angeles", closes: "2026-10-13T04:00:00Z" }],
+      ["p3", { ...place("c", "SMSHD", true, 1.0), from: "Pantages Theatre", travel: { mode: "WALK", minutes: 22, miles: 1.3 } }],
+    ]);
+    expect(JSON.parse(describePlaces(routed, ["p1", "p2", "p3"]))).toMatchObject([
+      { name: "Carney's", travel: "6 min walk", walkable: true, takeout: true, delivery: false, dine_in: true },
+      { name: "Mel's", travel: "9 min walk", walkable: true, reservable: true, closes: "9:00 PM" },
+      { name: "SMSHD", travel: "22 min walk", walkable: false },
+    ]);
+    // Closer by foot comes first even when the straight line says otherwise.
+    const cards = placeChoices(pick("p3", "p2", "p1"), routed)!;
+    expect(cards.map((c) => c.title)).toEqual(["Carney's", "Mel's", "SMSHD"]);
+    expect(cards[0]!.place).toMatchObject({ miles: 0.3, from: "Pantages Theatre", travel: { mode: "WALK", minutes: 6 } });
+    expect(placesIntro({}, cards)).toBe("I'd start with Carney's: a 6 min walk from Pantages Theatre, open now, rated 4.5. A few more worth a look are below.");
   });
   it("tells Claude when a place closes, in the person's time, and which he has already shown", () => {
     const again = new Map<string, FoundPlace>([["p1", { ...place("near", "Near Open", true, 0.4), closes: "2026-10-13T04:00:00Z", shown: true, summary: "Known for layer cakes." }]]);

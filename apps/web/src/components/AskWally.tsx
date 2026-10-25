@@ -664,9 +664,13 @@ function WallyTurn({
                       {c.title}
                       {c.place?.orders && <OrderCheck />}
                     </span>
-                    {c.place?.miles !== undefined && (
-                      <span className="shrink-0 text-[0.8rem] font-semibold text-ink-soft tabular-nums" title={c.place.from ? `${c.place.miles} miles from ${c.place.from}` : undefined}>
-                        {c.place.miles} mi{c.place.from ? <span className="font-normal"> from {c.place.from}</span> : <span className="sr-only"> away</span>}
+                    {(c.place?.travel || c.place?.miles !== undefined) && (
+                      <span
+                        className="shrink-0 text-[0.8rem] font-semibold text-ink-soft tabular-nums"
+                        title={[c.place.miles !== undefined && `${c.place.miles} miles`, c.place.from && `from ${c.place.from}`].filter(Boolean).join(" ") || undefined}
+                      >
+                        {c.place.travel ? `${c.place.travel.minutes} min ${c.place.travel.mode === "WALK" ? "walk" : "drive"}` : `${c.place.miles} mi`}
+                        {c.place.from ? <span className="font-normal"> from {c.place.from}</span> : <span className="sr-only"> away</span>}
                       </span>
                     )}
                   </span>

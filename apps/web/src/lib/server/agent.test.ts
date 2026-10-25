@@ -164,6 +164,11 @@ describe("asTexts", () => {
     const byTheater = { ...cookies, place: { ...cookies.place, miles: 0.3, from: "Pantages Theatre" } };
     expect(asTexts({ content: "Close by.", choices: [byTheater] }, "https://wallywaiter.com")[1]).toContain("Open now · 0.3 mi from Pantages Theatre · ★ 4.5 · $");
     expect(asPlainText({ content: "Close by.", choices: [byTheater] })).toContain("(0.3 mi from Pantages Theatre, open)");
+    // With a travel time, that is what is said, not the straight-line miles.
+    const walk = { ...byTheater, place: { ...byTheater.place, travel: { mode: "WALK" as const, minutes: 6 } } };
+    expect(asTexts({ content: "Close by.", choices: [walk] }, "https://wallywaiter.com")[1]).toContain("Open now · 6 min walk from Pantages Theatre · ★ 4.5 · $");
+    const drive = { ...cookies, place: { ...cookies.place, travel: { mode: "DRIVE" as const, minutes: 12 } } };
+    expect(asPlainText({ content: "x", choices: [drive] })).toContain("(12 min drive, open)");
     expect(asTexts({ content: "Two ideas.", choices: [ramen, tacos] }, "https://wallywaiter.com")).toEqual(["Two ideas.", "1. 🍜 Ramen\nRich and warm\n\n2. 🌮 Tacos\n\nVisit Wally for more options: wallywaiter.com/ask"]);
     expect(asTexts({ content: "", choices: [ramen, tacos] }, "https://wallywaiter.com", true)[0]).toMatch(/wallywaiter\.com\/ask\nIt's this same conversation, always in sync with our texts\.$/);
   });
