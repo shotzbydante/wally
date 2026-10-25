@@ -59,7 +59,10 @@ async function Account({ searchParams }: { searchParams: Query }) {
 
   const session = loaded.account;
   const inDatabase = loaded.kept === "database";
-  const eraseFailed = (await searchParams).problem === "erase";
+  const problem = (await searchParams).problem;
+  const eraseFailed = problem === "erase";
+  // An "add this email" link opened in another browser signs in plainly instead of linking (see the email callback).
+  const linkElsewhere = problem === "link_elsewhere";
 
   const wallyNumber = process.env.NEXT_PUBLIC_WALLY_NUMBER ?? null;
   // A ready-written text that proves this phone belongs to this account (see connectCode).
@@ -74,6 +77,11 @@ async function Account({ searchParams }: { searchParams: Query }) {
         {eraseFailed && (
           <p role="alert" className="mb-6 rounded-xl border border-red/40 bg-red/5 p-3 text-[0.95rem] font-medium text-red">
             Your account wasn’t erased. Wally’s records didn’t respond. Nothing was deleted. Try again in a moment.
+          </p>
+        )}
+        {linkElsewhere && (
+          <p role="alert" className="mb-6 rounded-xl border border-line bg-pad p-3 text-[0.95rem] font-medium text-ink-soft">
+            That link was opened in a different browser, so it signed you in on its own instead of adding the email to your other account. To add it, ask for the link again and open it in the browser where you’re signed in.
           </p>
         )}
         <div className="flex items-center gap-4">

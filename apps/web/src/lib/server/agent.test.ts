@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { asPlainText, asTexts, textDeliveryLinks, isOwnSite, tidyLink, webNudgeDue, splitSources, withSources, type ChatMessage } from "@/lib/chat";
-import { describePlaces, readChoices, readWeb, toClaudeMessages, type FoundPlace } from "./agent";
+import { describePlaces, readChoices, readWeb, toClaudeMessages, withHistoryCache, type FoundPlace } from "./agent";
 
 const message = (id: number, role: ChatMessage["role"], content: string, choices: ChatMessage["choices"] = null): ChatMessage => ({
   id,
@@ -31,6 +31,26 @@ describe("toClaudeMessages", () => {
   });
   it("starts with the person even when the window opens on Wally's turn", () => {
     expect(toClaudeMessages([message(1, "assistant", "Welcome back."), message(2, "user", "hi")])).toEqual([{ role: "user", content: "hi" }]);
+  });
+});
+
+describe("withHistoryCache", () => {
+  const cache = { cache_control: { type: "ephemeral" } };
+  it("marks only the last block of the last message, without touching the originals", () => {
+    const original = [
+      { role: "user" as const, content: "hi" },
+      { role: "assistant" as const, content: [{ type: "text" as const, text: "Hello." }] },
+      { role: "user" as const, content: [{ type: "tool_result" as const, tool_use_id: "t1", content: "a" }, { type: "text" as const, text: "and" }] },
+    ];
+    const cached = withHistoryCache(original);
+    expect(cached[0]).toEqual({ role: "user", content: "hi" });
+    expect(cached[1]).toEqual(original[1]);
+    expect(cached[2]).toEqual({ role: "user", content: [{ type: "tool_result", tool_use_id: "t1", content: "a" }, { type: "text", text: "and", ...cache }] });
+    expect(original[2].content[1]).toEqual({ type: "text", text: "and" });
+  });
+  it("turns a plain-string last message into one cached text block", () => {
+    expect(withHistoryCache([{ role: "user", content: "hi" }])).toEqual([{ role: "user", content: [{ type: "text", text: "hi", ...cache }] }]);
+    expect(withHistoryCache([])).toEqual([]);
   });
 });
 

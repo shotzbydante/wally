@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { claimSignInLink, signIn } from "@/lib/server/accounts";
 import { DbError } from "@/lib/server/db";
-import { appOrigin, readToken, sessionSecret } from "@/lib/server/session";
+import { appOrigin, readToken, sessionFromRequest, sessionSecret } from "@/lib/server/session";
 
 export async function GET(request: Request) {
   const origin = appOrigin(request);
@@ -18,7 +18,11 @@ export async function GET(request: Request) {
     throw error;
   }
 
-  const res = NextResponse.redirect(`${origin}/account`, 303);
-  if (!(await signIn(res, request, { email: link.email }, secret, { linkTo: link.link }))) return fail("unavailable");
+  // A link that adds this email to an account only does so in the browser that asked for it.
+  // Otherwise anyone signed in could mail a "sign-in link" to someone else's address and,
+  // when they opened it, fold that person's account into their own. Elsewhere it is a plain sign-in.
+  const linkTo = link.link && sessionFromRequest(request, secret)?.id === link.link ? link.link : undefined;
+  const res = NextResponse.redirect(link.link && !linkTo ? `${origin}/account?problem=link_elsewhere` : `${origin}/account`, 303);
+  if (!(await signIn(res, request, { email: link.email }, secret, { linkTo }))) return fail("unavailable");
   return res;
 }

@@ -18,10 +18,18 @@ export function emailConfigured(): boolean {
   return Boolean(process.env.RESEND_API_KEY && process.env.EMAIL_FROM) || devLinks();
 }
 
-export async function sendSignInLink(email: string, link: string): Promise<EmailResult> {
+/**
+ * Emails a sign-in link. `linking` means the link will add this address to an
+ * already signed-in account, so the email says that: it must open in the
+ * browser that asked for it, and anyone who didn't ask should ignore it.
+ */
+export async function sendSignInLink(email: string, link: string, linking = false): Promise<EmailResult> {
   const key = process.env.RESEND_API_KEY;
   const from = process.env.EMAIL_FROM;
   if (!key || !from) return devLinks() ? { ok: true, devLink: link } : { ok: false, reason: "not_configured" };
+  const what = linking
+    ? `Open this link in the browser where you're signed in to Wally to add this email address to that account. It works for ${EMAIL_LINK_MINUTES} minutes.`
+    : `Open this link to sign in to Wally. It works for ${EMAIL_LINK_MINUTES} minutes.`;
   try {
     const res = await fetch("https://api.resend.com/emails", {
       method: "POST",
@@ -29,10 +37,11 @@ export async function sendSignInLink(email: string, link: string): Promise<Email
       body: JSON.stringify({
         from,
         to: [email],
-        subject: "Your Wally sign-in link",
-        text: `Open this link to sign in to Wally. It works for ${EMAIL_LINK_MINUTES} minutes.\n\n${link}\n\nIf you didn't ask for this, you can ignore this email.`,
+        subject: linking ? "Add this email to your Wally account" : "Your Wally sign-in link",
+        text: `${what}\n\n${link}\n\nIf you didn't ask for this, you can ignore this email.`,
       }),
       cache: "no-store",
+      signal: AbortSignal.timeout(10_000),
     });
     return res.ok ? { ok: true } : { ok: false, reason: "provider_error" };
   } catch {

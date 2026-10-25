@@ -89,10 +89,10 @@ export function AskWally({
 
   // Messages can arrive from elsewhere (another device, and soon text), so
   // look again whenever the person comes back to this tab.
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (): Promise<ChatMessage[] | null> => {
     try {
       const res = await fetch("/api/chat", { cache: "no-store" });
-      if (!res.ok) return;
+      if (!res.ok) return null;
       const data = (await res.json()) as { messages: ChatMessage[]; address?: string | null; places?: boolean };
       if (typeof data.places === "boolean") setPlaces(data.places);
       if (data.address !== undefined) setAddress(data.address);
@@ -100,8 +100,16 @@ export function AskWally({
         const last = (list: ChatMessage[]) => list[list.length - 1]?.id;
         return current.length === data.messages.length && last(current) === last(data.messages) ? current : data.messages;
       });
-    } catch {}
+      return data.messages;
+    } catch {
+      return null;
+    }
   }, []);
+  /** The text of the person's latest stored message, after re-reading the thread. Null if it couldn't be read. */
+  const latestUserMessage = useCallback(async () => {
+    const list = await refresh();
+    return list ? (list.filter((m) => m.role === "user").pop()?.content ?? "") : null;
+  }, [refresh]);
   // And once on arrival: a page opened before a change went live should still catch up.
   useEffect(() => {
     const soon = setTimeout(() => void refresh(), 0);
@@ -203,7 +211,17 @@ export function AskWally({
         for (const line of lines) if (line.trim()) handle(JSON.parse(line) as ChatEvent);
       }
     } catch {
-      if (!finished) return fail("network", text);
+      // The connection dropped mid-answer. The server keeps going and saves the reply,
+      // so check what was actually saved before saying the message wasn't sent:
+      // handing the words back now would have them sent twice.
+      if (!finished) {
+        const saved = await latestUserMessage();
+        if (saved === text) {
+          setPending(null);
+          setMood("idle");
+        } else fail("network", text);
+        return;
+      }
     }
     // The connection closed without a verdict: check what was actually saved.
     if (!finished) {

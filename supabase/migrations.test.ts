@@ -39,7 +39,7 @@ beforeAll(async () => {
 }, 30_000);
 
 beforeEach(async () => {
-  await db.exec("reset role; truncate public.accounts, public.used_sign_in_links cascade; set role service_role;");
+  await db.exec("reset role; truncate public.accounts, public.used_sign_in_links, public.rate_limits cascade; set role service_role;");
 });
 
 interface SignIn {
@@ -295,6 +295,34 @@ describe("address", () => {
   });
 });
 
+describe("rate limits", () => {
+  const hit = async (key: string, limit = 3, window = "1 hour") =>
+    (await db.query<{ ok: boolean }>("select public.wally_rate_hit($1, $2, $3::interval) as ok", [key, limit, window])).rows[0]!.ok;
+
+  it("allows up to the limit in a window, then refuses", async () => {
+    expect(await hit("k")).toBe(true);
+    expect(await hit("k")).toBe(true);
+    expect(await hit("k")).toBe(true);
+    expect(await hit("k")).toBe(false);
+    expect(await hit("k")).toBe(false);
+    // A different key has its own count.
+    expect(await hit("other")).toBe(true);
+  });
+
+  it("starts a fresh window once the old one has passed", async () => {
+    expect(await hit("k", 1, "1 hour")).toBe(true);
+    expect(await hit("k", 1, "1 hour")).toBe(false);
+    await db.query("update public.rate_limits set window_end = now() - interval '1 second' where key = 'k'");
+    expect(await hit("k", 1, "1 hour")).toBe(true);
+    expect(await hit("k", 1, "1 hour")).toBe(false);
+  });
+
+  it("indexes the daily message count", async () => {
+    const { rows } = await db.query<{ indexdef: string }>("select indexdef from pg_indexes where indexname = 'messages_daily_idx'");
+    expect(rows[0]?.indexdef).toMatch(/\(account_id, created_at\) WHERE \(role = 'user'::text\)/);
+  });
+});
+
 describe("access", () => {
   it.each(["anon", "authenticated"])("is closed to the %s role, which the publishable key maps to", async (role) => {
     await db.exec("reset role");
@@ -309,6 +337,8 @@ describe("access", () => {
     await expect(db.query("select public.wally_text_begin('3105550142', 'hi', null, 100, 40)")).rejects.toThrow(/permission denied/);
     await expect(db.query("select public.wally_text_stop('3105550142', true)")).rejects.toThrow(/permission denied/);
     await expect(db.query("select * from public.wally_set_address(gen_random_uuid(), 'x', 1, 1)")).rejects.toThrow(/permission denied/);
+    await expect(db.query("select * from public.rate_limits")).rejects.toThrow(/permission denied/);
+    await expect(db.query("select public.wally_rate_hit('k', 1, interval '1 hour')")).rejects.toThrow(/permission denied/);
     await expect(
       db.query("select * from public.wally_sign_in(null, 'x@example.com', false, null, null, null, null, false)"),
     ).rejects.toThrow(/permission denied/);

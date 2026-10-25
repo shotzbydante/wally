@@ -369,6 +369,22 @@ export function toClaudeMessages(thread: ChatMessage[]): Anthropic.MessageParam[
 }
 
 /**
+ * The same messages with a cache breakpoint on the last block, so the whole
+ * thread so far is read from Anthropic's prompt cache: by the next round of
+ * this turn (which appends a tool result), and by the next turn (which
+ * appends Wally's answer and the person's next message), as long as the
+ * history window hasn't slid. Nothing is mutated: a breakpoint must sit only
+ * on the newest message, and there may be at most four in a request.
+ */
+export function withHistoryCache(messages: Anthropic.MessageParam[]): Anthropic.MessageParam[] {
+  const last = messages[messages.length - 1];
+  if (!last) return messages;
+  const cache = { cache_control: { type: "ephemeral" as const } };
+  const content: Anthropic.ContentBlockParam[] = typeof last.content === "string" ? [{ type: "text", text: last.content, ...cache }] : last.content.map((block, i, all) => (i === all.length - 1 ? ({ ...block, ...cache } as Anthropic.ContentBlockParam) : block));
+  return [...messages.slice(0, -1), { ...last, content } as Anthropic.MessageParam];
+}
+
+/**
  * What one answer drew from the web: the pages Wally cited, and every site
  * the search returned (used to check links on option cards).
  */
@@ -681,7 +697,7 @@ export async function reply(thread: ChatMessage[], guest: Guest, channel: Channe
         tools: [...(hasPlaces ? [FIND_PLACES_TOOL, SHOW_PLACES_TOOL] : [searchTool(guest)]), ...(canOrder ? [FIND_MENU_TOOL, ORDER_TICKET_TOOL, ...(hasPlaces ? [ORDERABLE_PLACES_TOOL] : [])] : []), CHOICES_TOOL],
         // One tool at a time: a search has to finish before options are shown.
         tool_choice: { type: "auto", disable_parallel_tool_use: true },
-        messages,
+        messages: withHistoryCache(messages),
       });
       stream.on("streamEvent", (event) => {
         if (event.type === "content_block_start") {
@@ -703,6 +719,14 @@ export async function reply(thread: ChatMessage[], guest: Guest, channel: Channe
         // A long search paused mid-turn: hand the turn back unchanged to carry on.
         messages.push(turn);
         continue;
+      }
+      if (message.stop_reason === "max_tokens" && tool?.type === "tool_use") {
+        // The call was cut off, so its input can't be trusted; never run it. Ask for a shorter one.
+        if (round < MAX_ROUNDS - 1) {
+          answer({ content: "Cut off by the length limit before the call was complete. Think less and call again, briefly.", is_error: true });
+          continue;
+        }
+        throw new AgentError("failed");
       }
       if (tool?.type !== "tool_use") break;
       if (tool.name === FIND_PLACES_TOOL.name) {
