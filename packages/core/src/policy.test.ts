@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { canSubmit, type SubmitContext } from "./policy";
+import { canHandOff, canSubmit, type HandoffContext, type SubmitContext } from "./policy";
 import type { Quote } from "./connector";
 
 const quote: Quote = {
@@ -46,4 +46,19 @@ describe("canSubmit", () => {
   it("honors the kill switch", () => expect(code({ paused: true })).toBe("paused"));
   it("fails closed when payments are degraded", () =>
     expect(code({ paymentsHealthy: false })).toBe("payments_degraded"));
+});
+
+describe("canHandOff", () => {
+  const ok: HandoffContext = { quote: { ...quote, handoffUrl: "https://checkout.example/c/1" }, paused: false, checkoutHealthy: true, now: new Date("2026-01-01T00:02:00Z") };
+  const code = (over: Partial<HandoffContext>) => {
+    const d = canHandOff({ ...ok, ...over });
+    return d.allow ? "allow" : d.code;
+  };
+  it("allows a fresh quote with a checkout page, needing no approval: the diner approves by paying there", () => expect(code({})).toBe("allow"));
+  it("honors the kill switch", () => expect(code({ paused: true })).toBe("paused"));
+  it("fails closed when the checkout is degraded or there is no page to send the diner to", () => {
+    expect(code({ checkoutHealthy: false })).toBe("payments_degraded");
+    expect(code({ quote })).toBe("payments_degraded");
+  });
+  it("denies an expired quote", () => expect(code({ now: new Date("2026-01-01T00:10:00Z") })).toBe("quote_expired"));
 });

@@ -1,4 +1,5 @@
 /** Shapes shared by the chat API and the page. */
+import type { MenuEntry, Venue } from "@wally/core";
 
 /** An option Wally offers. `reply` is what choosing it says back to him. */
 export interface Choice {
@@ -12,6 +13,42 @@ export interface Choice {
   place?: PlaceInfo;
   /** Set when the card is an order ready to pay (see TicketInfo). */
   ticket?: TicketInfo;
+  /**
+   * Not a card: the menu an order is being decided from, carried on Wally's
+   * answer so the next turn can order from it without reading it again.
+   * Never shown; `visibleChoices` leaves it out. Claude reads it back as text.
+   */
+  menu?: MenuSnapshot;
+}
+
+/** The menu find_menu returned, by the short ids Claude uses, as plain data. */
+export interface MenuSnapshot {
+  venue: Venue;
+  items: Record<string, MenuEntry>;
+  /** Option ids by short id, each with the item and choice group it belongs to. */
+  options: Record<string, { itemId: string; groupId: string; optionId: string }>;
+  /** How many answers ago it was last read or ordered from. */
+  age: number;
+}
+
+/** The options a person is shown; a carried menu is not one. */
+export const visibleChoices = (choices: Choice[] | null | undefined): Choice[] => (choices ?? []).filter((c) => !c.menu);
+
+/** The carried menu as Claude reads it back in his own earlier turn, ids included, so he can order from it. */
+export function menuLines(menu: MenuSnapshot): string {
+  const items = Object.entries(menu.items).map(([id, item]) => {
+    const groups = item.choices.map((g) => {
+      const opts = Object.entries(menu.options)
+        .filter(([, o]) => o.itemId === id && o.groupId === g.id)
+        .map(([oid, o]) => {
+          const opt = g.options.find((x) => x.id === o.optionId);
+          return `${oid} ${opt?.name ?? ""}${opt?.price ? ` +${dollars(opt.price)}` : ""}`;
+        });
+      return `${g.name} (pick ${g.min === g.max ? g.min : `${g.min}-${g.max}`}): ${opts.join(", ")}`;
+    });
+    return `${id} ${item.name} ${dollars(item.unitPrice)}${groups.length ? ` [${groups.join("; ")}]` : ""}`;
+  });
+  return `Menu at ${menu.venue.name} (order_ticket takes these ids): ${items.join(" | ")}`;
 }
 
 /**
@@ -99,13 +136,14 @@ export const MAX_MESSAGE_CHARS = 2000;
  * a text thread shows, and what Wally reads back as his own earlier turn.
  */
 export function asPlainText(message: Pick<ChatMessage, "content" | "choices">): string {
-  const list = (message.choices ?? []).map((c, i) => {
+  const carried = (message.choices ?? []).find((c) => c.menu)?.menu;
+  const list = visibleChoices(message.choices).map((c, i) => {
     if (c.ticket) return `${i + 1}. Order at ${c.ticket.restaurant}: ${ticketLines(c.ticket).join("; ")} ${c.ticket.checkoutUrl}`;
     const facts = [howFar(c.place), c.place?.open === true && "open", c.place?.open === false && "closed", c.place?.orders && "order with Wally"].filter(Boolean);
     const link = c.place?.website ?? c.place?.maps ?? c.url;
     return `${i + 1}. ${c.title}${facts.length ? ` (${facts.join(", ")})` : ""}${c.detail ? `: ${c.detail}` : ""}${link ? ` ${link}` : ""}`;
   });
-  return [message.content, ...list].filter(Boolean).join("\n");
+  return [message.content, ...list, carried && menuLines(carried)].filter(Boolean).join("\n");
 }
 
 /**
@@ -143,7 +181,7 @@ export function tidyLink(url: string): string {
  * where the same conversation is waiting; `sayInSync` adds a line saying so.
  */
 export function asTexts(message: Pick<ChatMessage, "content" | "choices">, origin: string, sayInSync = false): string[] {
-  const cards = (message.choices ?? []).map((c, i) => {
+  const cards = visibleChoices(message.choices).map((c, i) => {
     if (c.ticket) return [`${i + 1}. 🧾 ${c.ticket.restaurant}`, ...ticketLines(c.ticket), `Pay here: ${c.ticket.checkoutUrl}`].join("\n");
     const p = c.place;
     const facts = [

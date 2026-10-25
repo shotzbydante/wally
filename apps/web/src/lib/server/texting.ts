@@ -1,5 +1,5 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
-import { asTexts, tidyLink, webNudgeDue } from "@/lib/chat";
+import { asTexts, tidyLink, visibleChoices, webNudgeDue } from "@/lib/chat";
 import { linkPhone } from "./accounts";
 import { AgentError, reply } from "./agent";
 import { beginTextTurn, saveReply, setTextStopped, undoTurn } from "./conversation";
@@ -264,7 +264,7 @@ export async function handleInbound(inbound: Inbound, origin: string): Promise<v
         // Options always end with a link to the website. That it is the same conversation is said
         // on his first answer and after a quiet week: under the options, or as a P.S. to plain words.
         const nudge = begun.first || webNudgeDue(begun.messages);
-        const texts = [...asTexts(answer, origin, nudge), ...(nudge && !answer.choices?.length ? [NOTICE.web(origin)] : [])];
+        const texts = [...asTexts(answer, origin, nudge), ...(nudge && !visibleChoices(answer.choices).length ? [NOTICE.web(origin)] : [])];
         for (const part of texts) if (!(await sendText(provider, from, part))) break;
       }
     } catch (error) {
