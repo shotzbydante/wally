@@ -256,12 +256,14 @@ export function AskWally({
     }
   };
 
-  // Grow the box with the message, up to a few lines.
+  // Grow the box with the message, up to a few lines. An empty box takes its
+  // height from the stylesheet: a size measured while the page isn't laid out
+  // (a background tab, a hidden pane) can't be trusted, and that is when it mounts.
   useEffect(() => {
     const el = input.current;
     if (!el) return;
-    el.style.height = "auto";
-    el.style.height = `${Math.min(el.scrollHeight, 168)}px`;
+    el.style.height = "";
+    if (draft && el.scrollHeight > 0) el.style.height = `${Math.min(el.scrollHeight, 168)}px`;
   }, [draft]);
 
   const line = !ready
