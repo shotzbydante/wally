@@ -44,10 +44,10 @@ body {
   line-height: 1.5;
 }
 
+/* The outline follows each element's own radius; setting one here reshaped round buttons when focused. */
 :focus-visible {
   outline: 3px solid var(--mint);
   outline-offset: 3px;
-  border-radius: 6px;
 }
 
 /* Wally's render sits on the same backdrop colour as the page, so

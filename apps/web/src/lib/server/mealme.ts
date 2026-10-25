@@ -102,7 +102,9 @@ async function call<T>(path: string, body?: unknown): Promise<T> {
     data = JSON.parse(text);
   } catch {}
   if (!res.ok) {
-    const message = (data as { message?: string } | null)?.message ?? `${res.status}`;
+    // MealMe sometimes answers with an object under message; keep it a string so the error stays a MealMeError.
+    const raw = (data as { message?: unknown } | null)?.message;
+    const message = typeof raw === "string" ? raw : raw ? JSON.stringify(raw) : `${res.status}`;
     // Status and MealMe's own message: enough to diagnose, nothing from the conversation.
     console.error(`[mealme] ${path.split("?")[0]} ${res.status} ${message.slice(0, 200)}`);
     throw new MealMeError(res.status, message);

@@ -50,11 +50,13 @@ export function LocationBar({ saved, onChange }: { saved: string | null; onChang
   const field = useRef<HTMLInputElement>(null);
   /** One id per stretch of typing, which Google uses to group the lookups. */
   const typing = useRef("");
+  /** A suggestion just tapped: its text fills the box without asking Google again (each lookup is billed). */
+  const chosen = useRef("");
 
   // Suggest addresses a moment after the person stops typing.
   useEffect(() => {
     const typed = draft.trim();
-    if (!asking || typed.length < 3) return;
+    if (!asking || typed.length < 3 || typed === chosen.current) return;
     const stop = new AbortController();
     const timer = setTimeout(async () => {
       typing.current ||= crypto.randomUUID();
@@ -246,6 +248,7 @@ export function LocationBar({ saved, onChange }: { saved: string | null; onChang
                     disabled={busy}
                     className="flex w-full items-center gap-2.5 px-3 py-2 text-left hover:bg-mint-wash/60 active:bg-mint-wash disabled:opacity-60"
                     onClick={() => {
+                      chosen.current = s.text.trim();
                       setDraft(s.text);
                       setSuggestions([]);
                       void request("POST", s.text);

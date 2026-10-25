@@ -13,6 +13,7 @@ const problems: Record<string, string> = {
   not_configured: "Email sign-in isn’t switched on yet, so no link was sent.",
   invalid_email: "Enter a valid email address.",
   provider_error: "The email service didn’t respond. Try again in a moment.",
+  rate_limited: "Too many links asked for. Check your inbox, or wait a while and try again.",
   network: "Couldn’t reach Wally. Check your connection and try again.",
 };
 
