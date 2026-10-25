@@ -86,6 +86,13 @@ describe("searchPlaces", () => {
     const box = (calls[1]!.body.locationRestriction as { rectangle: { low: { latitude: number }; high: { latitude: number } } }).rectangle;
     expect(Math.round((box.high.latitude - box.low.latitude) * 69)).toBe(20);
   });
+  it("steers a fast-food search toward quick-service places and drive-thrus", async () => {
+    const calls = google([]);
+    await searchPlaces({ query: "coffee", near: home, fastFood: true });
+    expect(calls[0]!.body.textQuery).toBe("coffee fast food drive-thru");
+    await searchPlaces({ query: "drive thru burgers", near: home, fastFood: true });
+    expect(calls[1]!.body.textQuery).toBe("drive thru burgers");
+  });
   it("throws when Google refuses", async () => {
     google([], 403);
     await expect(searchPlaces({ query: "dessert" })).rejects.toThrow("403");
@@ -200,6 +207,14 @@ describe("place cards", () => {
     expect(cards.map((c) => c.title)).toEqual(["Carney's", "Mel's", "SMSHD"]);
     expect(cards[0]!.place).toMatchObject({ miles: 0.3, from: "Pantages Theatre", travel: { mode: "WALK", minutes: 6 } });
     expect(placesIntro({}, cards)).toBe("I'd start with Carney's: a 6 min walk from Pantages Theatre, open now, rated 4.5. A few more worth a look are below.");
+  });
+  it("names the chain a listing belongs to, its drive-thru habit, and puts its icon on the card", () => {
+    const chains = new Map<string, FoundPlace>([["p1", place("mcd", "McDonald's", true, 0.5)], ["p2", place("ind", "Tacos El Gordo", true, 0.6)]]);
+    expect(JSON.parse(describePlaces(chains, ["p1", "p2"]))).toMatchObject([{ name: "McDonald's", chain: "McDonald's", drive_thru_likely: "usually" }, { name: "Tacos El Gordo" }]);
+    expect(JSON.parse(describePlaces(chains, ["p2"]))[0]).not.toHaveProperty("chain");
+    const cards = placeChoices(pick("p1", "p2"), chains)!;
+    expect(cards[0]!.place!.chain).toEqual({ name: "McDonald's", domain: "mcdonalds.com", driveThru: "usually", kind: "burgers" });
+    expect(cards[1]!.place!.chain).toBeUndefined();
   });
   it("tells Claude when a place closes, in the person's time, and which he has already shown", () => {
     const again = new Map<string, FoundPlace>([["p1", { ...place("near", "Near Open", true, 0.4), closes: "2026-10-13T04:00:00Z", shown: true, summary: "Known for layer cakes." }]]);

@@ -8,19 +8,20 @@ import { useState } from "react";
  * the site's domain; if one source has nothing it tries the next, and if none
  * does, the letter tile underneath is what shows.
  */
-export function SiteIcon({ domain, letter }: { domain: string; letter: string }) {
+export function SiteIcon({ domain, letter, size = "md" }: { domain: string; letter: string; size?: "sm" | "md" }) {
   const sources = [`https://www.google.com/s2/favicons?domain=${domain}&sz=128`, `https://icons.duckduckgo.com/ip3/${domain}.ico`];
   const [at, setAt] = useState(0);
   const src = sources[at];
+  const box = size === "sm" ? "size-10" : "size-11";
   if (!src) {
     return (
-      <span className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-mint-wash text-[1.15rem] font-bold text-green-deep" aria-hidden="true">
+      <span className={`flex ${box} shrink-0 items-center justify-center rounded-xl bg-mint-wash text-[1.15rem] font-bold text-green-deep`} aria-hidden="true">
         {letter}
       </span>
     );
   }
   return (
-    <span className="flex size-11 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-pad ring-1 ring-line ring-inset" aria-hidden="true">
+    <span className={`tile flex ${box} shrink-0 items-center justify-center overflow-hidden rounded-xl bg-pad ring-1 ring-line ring-inset`} aria-hidden="true">
       {/* eslint-disable-next-line @next/next/no-img-element -- a tiny remote icon; the image optimizer would need every icon host allow-listed */}
       <img
         src={src}

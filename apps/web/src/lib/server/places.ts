@@ -287,6 +287,8 @@ export interface PlaceSearch {
   /** Where `area` is, when it has been looked up: the search is then held to a box around it instead of leaning on the words. */
   anchor?: Anchor | null;
   openNow?: boolean;
+  /** The quick-service kind of answer: fast food, drive-thrus, the big chains. The query is steered that way; Google has no drive-thru field to filter on. */
+  fastFood?: boolean;
   /** Fewer results than a full page, for a lookup of one named place. */
   limit?: number;
   /** Ask Google how long each place takes to reach from here, on foot or by road. Costs nothing extra within the search's billing tier. */
@@ -303,9 +305,10 @@ export async function searchPlaces(search: PlaceSearch): Promise<Place[]> {
   const area = search.area?.trim();
   const anchor = search.anchor ?? null;
   const travel = search.travel ?? null;
+  const query = search.fastFood && !/fast[\s-]?food|drive[\s-]?thr/i.test(search.query) ? `${withoutNearMe(search.query)} fast food drive-thru`.trim() : withoutNearMe(search.query);
   const { places: raw, routingSummaries } = await searchText(
     {
-      textQuery: area && !anchor ? `${withoutNearMe(search.query)} near ${area}` : withoutNearMe(search.query),
+      textQuery: area && !anchor ? `${query} near ${area}` : query,
       pageSize: search.limit ?? PAGE_SIZE,
       ...(search.openNow ? { openNow: true } : {}),
       ...(anchor ? { locationRestriction: boxAround(anchor.point, anchor.wide ? AROUND_CITY_MILES : AROUND_SPOT_MILES) } : !area && search.near ? { locationRestriction: boxAround(search.near) } : {}),

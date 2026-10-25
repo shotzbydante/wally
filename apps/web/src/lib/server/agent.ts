@@ -1,5 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { CURRENT_LOCATION, asPlainText, cityOf, hostOf, isOwnSite, withSources, type ChatMessage, type Choice, type MenuSnapshot, type Source, type TicketInfo } from "@/lib/chat";
+import { chainOf } from "@/lib/chains";
 import type { Channel } from "./conversation";
 import type { CartItem, MenuEntry, Venue } from "@wally/core";
 import { isConnectorError, mayHandOff, nameMatches, orderingConfigured, orderingConnector, sameStore, zipOf } from "./ordering";
@@ -42,6 +43,7 @@ const FINDING_WITH_PLACES = `# Finding places
 - When the person wants somewhere to eat, drink, order from or pick up from, call find_places. It searches real, current listings near their saved address and tells you how far each is and whether it is open right now.
 - Results carry travel ("6 min walk" or "12 min drive", from Google's own routing) beside miles. Use travel in your words, never a straight-line mile count: "a six-minute walk", "about fifteen minutes' drive". The cards show it too.
 - When they name somewhere to look around (a landmark, venue, theater, stadium, hotel, neighborhood, city or ZIP: "near the Pantages theater in Hollywood", "in Silver Lake", "by LAX"), pass it as area, whether or not they have a saved address. The search then centers there and every distance and walk time is measured from it: the results say so in miles_from, and the cards show it. Orient the whole answer around that spot, as a waiter who knows the block would: say which picks are an easy walk from it (walkable) and which mean a short drive, then what each is known for. Never mention their saved address or where they live in that answer, and never say the distances are from anywhere but the named spot.
+- Fast food and drive-thrus: when they ask for fast food, a drive-thru, a quick bite, something on the road, or a big chain by kind ("a coffee drive-thru", "burger chains"), call find_places with fast_food true and a plain query ("fast food", "drive-thru coffee", "burgers"). Each result then says which chain it is (chain) and how often that chain has a drive-thru (drive_thru_likely: usually, sometimes, rarely). When they said drive-thru, pick chains marked usually first, then sometimes, and say in the intro which of your picks usually has one; Google doesn't say whether this location does, so never promise it: a few words like "confirm the drive-thru before you go" cover it. A sit-down or independent answer is always offered the quick-service kind next, by the page and by text; you needn't say it yourself.
 - takeout, delivery, dine_in and reservable say what each listing offers. When someone wants pickup, takeout or something to bring home, show places with takeout true (or unknown) and never one marked false; for delivery, likewise with delivery; and say which of your picks offer what in a few words when it decides the choice. A place marked dine_in only is for eating there.
 - If they have no saved address (see the guest notes) and haven't named somewhere, ask them in one short line to add their address in the bar at the top of the page, or to name an area.
 - Results near the saved address are held to about 25 miles around it; around a named spot, a few miles. If nothing fits, say so and offer to look in a named area, or further out.
@@ -174,6 +176,7 @@ const FIND_PLACES_TOOL: Anthropic.Tool = {
       query: { type: "string", description: "What to look for, in a few words: 'dessert', 'ramen', 'late night tacos', or a restaurant's name." },
       area: { type: "string", description: "The place to search around, when the person named one in their latest message: a landmark, venue, theater, stadium, hotel, neighborhood, city or ZIP, as they put it plus the city if they gave one ('Pantages Theatre, Hollywood', 'Silver Lake, Los Angeles', '93720'). Pass it whenever they name somewhere, even with a saved address. Never for 'near me' or 'nearby'." },
       open_now: { type: "boolean", description: "True to return only places open right now. Use it when they want to eat now." },
+      fast_food: { type: "boolean", description: "True when they want fast food, a drive-thru, a quick bite or the big chains. The search is steered to quick-service places and each result says which chain it is and whether that chain usually has a drive-thru." },
     },
     required: ["query"],
   },
@@ -490,6 +493,8 @@ export function describePlaces(found: ReadonlyMap<string, FoundPlace>, ids: stri
       ratings: p.ratings ?? undefined,
       price: p.price ?? undefined,
       own_site: isOwnSite(p.website) || undefined,
+      chain: chainOf(p.name)?.name,
+      drive_thru_likely: chainOf(p.name)?.driveThru,
       address: p.address || undefined,
       already_shown: p.shown || undefined,
       can_order: p.orders || undefined,
@@ -531,6 +536,7 @@ export function placeChoices(input: unknown, found: ReadonlyMap<string, FoundPla
         ...(place.website ? { website: place.website } : {}),
         maps: place.maps,
         ...(place.orders ? { orders: true } : {}),
+        ...(chainOf(place.name) ? { chain: chainOf(place.name)! } : {}),
       },
     });
   }
@@ -664,7 +670,7 @@ export async function reply(thread: ChatMessage[], guest: Guest, channel: Channe
 
   /** Runs one find_places call and returns what Claude should be told. */
   const findPlaces = async (input: unknown): Promise<{ content: string; is_error?: boolean }> => {
-    const args = (input ?? {}) as { query?: unknown; area?: unknown; open_now?: unknown };
+    const args = (input ?? {}) as { query?: unknown; area?: unknown; open_now?: unknown; fast_food?: unknown };
     const query = clip(args.query, 120);
     const area = clip(args.area, 80);
     if (!query) return { content: "Give a query.", is_error: true };
@@ -681,7 +687,7 @@ export async function reply(thread: ChatMessage[], guest: Guest, channel: Channe
       const mode: TravelMode = anchor && !anchor.wide ? "WALK" : "DRIVE";
       // Places near the saved address are checked against the restaurants Wally can order from (not a named area elsewhere).
       const [places, stores] = await Promise.all([
-        searchPlaces({ query, area: area || undefined, anchor, near: guest.near, openNow: args.open_now === true, travel: origin ? { from: origin, mode } : null }),
+        searchPlaces({ query, area: area || undefined, anchor, near: guest.near, openNow: args.open_now === true, fastFood: args.fast_food === true, travel: origin ? { from: origin, mode } : null }),
         area ? [] : orderableStores(),
       ]);
       const ids = places.map((place) => {
