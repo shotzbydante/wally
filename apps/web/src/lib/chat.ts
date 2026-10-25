@@ -96,7 +96,24 @@ export interface PlaceInfo {
   maps: string;
   /** Wally can build a pickup order here (see "Ordering" in CLAUDE.md). */
   orders?: boolean;
+  /** A big chain the listing belongs to (see src/lib/chains.ts): the card shows its icon, and Wally knows its drive-thru habit. */
+  chain?: { name: string; domain: string; driveThru: "usually" | "sometimes" | "rarely" };
 }
+
+/** Whether an answer's place cards are the sit-down and independent kind, so offering the fast-food and drive-thru kind next makes sense. */
+export function offersFastFood(choices: Choice[] | null | undefined): boolean {
+  const places = visibleChoices(choices).filter((c) => c.place);
+  return places.length > 0 && !places.every((c) => c.place!.chain);
+}
+
+/** What the person says to get the quick-service answer, around the same spot as the cards. */
+export const fastFoodAsk = (choices: Choice[] | null | undefined) => {
+  const from = visibleChoices(choices).find((c) => c.place?.from)?.place?.from;
+  return `Show me fast food and drive-thru options ${from ? `near ${from}` : "near me"}`;
+};
+
+/** The line under a set of place cards that offers the quick-service kind next. */
+export const FAST_FOOD_LINE = "Fast food or a drive-thru? Just say so.";
 
 /** "6 min walk" or "12 min drive", or the straight-line miles when the search gave no travel time; with where it is from, when that isn't the saved address. */
 export function howFar(p: Pick<PlaceInfo, "miles" | "from" | "travel"> | undefined): string | undefined {
@@ -197,7 +214,7 @@ export function asTexts(message: Pick<ChatMessage, "content" | "choices">, origi
     return [`${i + 1}. ${c.emoji ? `${c.emoji} ` : ""}${c.title}`, facts.join(" · "), c.detail, ...links].filter(Boolean).join("\n");
   });
   // Every set of options closes with the way into the same conversation on the website.
-  const more = `Visit Wally for more options: ${tidyLink(`${origin}/ask`)}${sayInSync ? "\nIt's this same conversation, always in sync with our texts." : ""}`;
+  const more = `${offersFastFood(message.choices) ? `${FAST_FOOD_LINE}\n` : ""}Visit Wally for more options: ${tidyLink(`${origin}/ask`)}${sayInSync ? "\nIt's this same conversation, always in sync with our texts." : ""}`;
   return [message.content.trim(), cards.length ? `${cards.join("\n\n")}\n\n${more}` : ""].filter(Boolean);
 }
 

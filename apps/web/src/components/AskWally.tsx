@@ -4,7 +4,8 @@ import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type CS
 import { LocationBar } from "@/components/LocationBar";
 import { Wally } from "@/components/Wally";
 import { WallyFace, type WallyLook } from "@/components/WallyFace";
-import { MAX_MESSAGE_CHARS, OPEN_BADGE_MINUTES, deliveryLinks, dollars, hostOf, isOwnSite, splitSources, visibleChoices, type ChatEvent, type ChatMessage, type Choice, type TicketInfo } from "@/lib/chat";
+import { MAX_MESSAGE_CHARS, OPEN_BADGE_MINUTES, deliveryLinks, dollars, fastFoodAsk, hostOf, isOwnSite, offersFastFood, splitSources, visibleChoices, type ChatEvent, type ChatMessage, type Choice, type TicketInfo } from "@/lib/chat";
+import { SiteIcon } from "@/components/SiteIcon";
 
 /** What Wally is doing, which drives how he moves and what his bubble says. */
 type Mood = "idle" | "thinking" | "speaking" | "sorry";
@@ -392,7 +393,7 @@ export function AskWally({
             m.role === "user" ? (
               <UserBubble key={m.id} text={m.content} byText={m.channel === "text"} />
             ) : (
-              <WallyTurn key={m.id} text={m.content} at={m.created_at} byText={m.channel === "text"} choices={m.choices} live={m.id === lastId && !busy && ready} onPick={(c) => void send(c.reply)} onMore={() => void send("Show me 4 more")} />
+              <WallyTurn key={m.id} text={m.content} at={m.created_at} byText={m.channel === "text"} choices={m.choices} live={m.id === lastId && !busy && ready} onPick={(c) => void send(c.reply)} onMore={() => void send("Show me 4 more")} onFastFood={() => void send(fastFoodAsk(m.choices))} />
             ),
           )}
 
@@ -614,6 +615,7 @@ function WallyTurn({
   live = false,
   onPick,
   onMore,
+  onFastFood,
 }: {
   text: string;
   /** When Wally said it. */
@@ -626,6 +628,8 @@ function WallyTurn({
   onPick?: (choice: Choice) => void;
   /** Asks Wally for the next four places. */
   onMore?: () => void;
+  /** Asks for the fast-food and drive-thru kind of answer, around the same spot. */
+  onFastFood?: () => void;
 }) {
   // Sources ride along in the text (see splitSources); here they become links.
   const { text: said, sources } = splitSources(text);
@@ -659,7 +663,7 @@ function WallyTurn({
               style={{ "--d": `${i * 70}ms` } as CSSProperties}
             >
               <button type="button" disabled={!live} onClick={() => onPick?.(c)} className={`press flex w-full flex-1 items-start gap-2.5 px-2.5 text-left ${c.place ? "pt-2 pb-1.5" : "py-2.5"}`}>
-                <Tile>{c.emoji}</Tile>
+                {c.place?.chain ? <SiteIcon domain={c.place.chain.domain} letter={c.title.charAt(0)} size="sm" /> : <Tile>{c.emoji}</Tile>}
                 <span className="min-w-0 flex-1">
                   <span className="flex items-baseline gap-2">
                     <span className="line-clamp-2 min-w-0 flex-1 leading-[1.3] font-semibold">
@@ -722,13 +726,22 @@ function WallyTurn({
           <p className="text-[0.8125rem] leading-tight whitespace-nowrap" style={{ fontFamily: "Roboto, sans-serif", fontWeight: 400, color: "#5E5E5E" }}>
             <span translate="no">Google Maps</span>
           </p>
-          {live && onMore && (
-            <button type="button" onClick={onMore} className="press chip-lead inline-flex h-7 items-center gap-1 rounded-full px-3 text-[0.8rem] font-semibold text-green-deep ring-1 ring-mint/50 ring-inset hover:ring-green">
-              See 4 more
-              <svg viewBox="0 0 24 24" className="size-3.5" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <path d="m6 9 6 6 6-6" />
-              </svg>
-            </button>
+          {live && (onMore || onFastFood) && (
+            <span className="flex items-center gap-1.5">
+              {onFastFood && offersFastFood(choices) && (
+                <button type="button" onClick={onFastFood} className="press inline-flex h-7 items-center gap-1 rounded-full bg-pad px-3 text-[0.8rem] font-semibold text-ink-soft ring-1 ring-line ring-inset hover:ring-ink">
+                  <span aria-hidden="true">🚗</span> Fast food &amp; drive-thru
+                </button>
+              )}
+              {onMore && (
+                <button type="button" onClick={onMore} className="press chip-lead inline-flex h-7 items-center gap-1 rounded-full px-3 text-[0.8rem] font-semibold text-green-deep ring-1 ring-mint/50 ring-inset hover:ring-green">
+                  See 4 more
+                  <svg viewBox="0 0 24 24" className="size-3.5" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d="m6 9 6 6 6-6" />
+                  </svg>
+                </button>
+              )}
+            </span>
           )}
         </div>
       )}
