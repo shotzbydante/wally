@@ -5,7 +5,7 @@
  * shapes; those live in the connector's own file.
  */
 import { canHandOff, type Decision, type OrderingConnector, type Quote, type Venue } from "@wally/core";
-import { mealmeConfigured, mealmeConnector } from "./mealme";
+import { MealMeError, mealmeConfigured, mealmeConnector } from "./mealme";
 
 export const orderingConfigured = () => mealmeConfigured();
 
@@ -13,6 +13,9 @@ export const orderingConfigured = () => mealmeConfigured();
 export function orderingConnector(customer: string): OrderingConnector | null {
   return mealmeConfigured() ? mealmeConnector(customer) : null;
 }
+
+/** An error a connector raised about its source (not answering, refusing, figures that don't add up): told to the model plainly. Anything else is a bug and is thrown. */
+export const isConnectorError = (error: unknown): boolean => error instanceof MealMeError;
 
 /** The kill switch (AP-5): set WALLY_ORDERING_PAUSED=1 and no ticket is handed off. */
 export const orderingPaused = () => process.env.WALLY_ORDERING_PAUSED?.trim() === "1";

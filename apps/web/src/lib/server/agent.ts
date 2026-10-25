@@ -2,7 +2,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { CURRENT_LOCATION, asPlainText, cityOf, hostOf, isOwnSite, withSources, type ChatMessage, type Choice, type MenuSnapshot, type Source, type TicketInfo } from "@/lib/chat";
 import type { Channel } from "./conversation";
 import type { CartItem, MenuEntry, Venue } from "@wally/core";
-import { mayHandOff, nameMatches, orderingConfigured, orderingConnector, sameStore, zipOf } from "./ordering";
+import { isConnectorError, mayHandOff, nameMatches, orderingConfigured, orderingConnector, sameStore, zipOf } from "./ordering";
 import { PlacesError, findAnchor, milesBetween, placesConfigured, searchPlaces, zipAt, type Anchor, type Place, type Point, type TravelMode } from "./places";
 
 /**
@@ -565,9 +565,6 @@ export interface Listener {
   /** Wally has started looking something up. */
   onSearch?: () => void;
 }
-
-/** An error the ordering connector raised (its source not answering, refusing, or sending figures that don't add up): told to Claude plainly, never thrown. */
-const isConnectorError = (error: unknown) => error instanceof Error && !(error instanceof AgentError) && !(error instanceof PlacesError);
 
 export class AgentError extends Error {
   constructor(public reason: "not_configured" | "busy" | "failed") {
