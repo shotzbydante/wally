@@ -48,6 +48,8 @@ export interface PlaceInfo {
   miles?: number;
   /** Where `miles` is measured from when it isn't the saved address: the landmark, venue or area the person named ("Pantages Theatre"). */
   from?: string;
+  /** How long it takes to get there from the same origin, by Google's routing: on foot around a named spot, by road otherwise. */
+  travel?: { mode: "WALK" | "DRIVE"; minutes: number };
   /** Open when Wally answered. Only meaningful while the message is fresh. */
   open?: boolean;
   rating?: number;
@@ -57,6 +59,13 @@ export interface PlaceInfo {
   maps: string;
   /** Wally can build a pickup order here (see "Ordering" in CLAUDE.md). */
   orders?: boolean;
+}
+
+/** "6 min walk" or "12 min drive", or the straight-line miles when the search gave no travel time; with where it is from, when that isn't the saved address. */
+export function howFar(p: Pick<PlaceInfo, "miles" | "from" | "travel"> | undefined): string | undefined {
+  if (!p) return undefined;
+  const how = p.travel ? `${p.travel.minutes} min ${p.travel.mode === "WALK" ? "walk" : "drive"}` : p.miles !== undefined ? `${p.miles} mi` : undefined;
+  return how ? `${how}${p.from ? ` from ${p.from}` : ""}` : undefined;
 }
 
 /** A web page Wally drew on for an answer. */
@@ -92,7 +101,7 @@ export const MAX_MESSAGE_CHARS = 2000;
 export function asPlainText(message: Pick<ChatMessage, "content" | "choices">): string {
   const list = (message.choices ?? []).map((c, i) => {
     if (c.ticket) return `${i + 1}. Order at ${c.ticket.restaurant}: ${ticketLines(c.ticket).join("; ")} ${c.ticket.checkoutUrl}`;
-    const facts = [c.place?.miles !== undefined && `${c.place.miles} mi${c.place.from ? ` from ${c.place.from}` : ""}`, c.place?.open === true && "open", c.place?.open === false && "closed", c.place?.orders && "order with Wally"].filter(Boolean);
+    const facts = [howFar(c.place), c.place?.open === true && "open", c.place?.open === false && "closed", c.place?.orders && "order with Wally"].filter(Boolean);
     const link = c.place?.website ?? c.place?.maps ?? c.url;
     return `${i + 1}. ${c.title}${facts.length ? ` (${facts.join(", ")})` : ""}${c.detail ? `: ${c.detail}` : ""}${link ? ` ${link}` : ""}`;
   });
@@ -140,7 +149,7 @@ export function asTexts(message: Pick<ChatMessage, "content" | "choices">, origi
     const facts = [
       p?.open === true && "Open now",
       p?.open === false && "Closed",
-      p?.miles !== undefined && `${p.miles} mi${p.from ? ` from ${p.from}` : ""}`,
+      howFar(p),
       p?.rating !== undefined && `★ ${p.rating.toFixed(1)}`,
       p?.price,
       p?.orders && "🧾 Order with Wally",

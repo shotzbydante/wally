@@ -2,7 +2,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { CURRENT_LOCATION, asPlainText, cityOf, hostOf, isOwnSite, withSources, type ChatMessage, type Choice, type Source } from "@/lib/chat";
 import type { Channel } from "./conversation";
 import { MealMeError, checkout, mealmeConfigured, nameMatches, sameStore, searchMenu, searchStores, zipOf, type MenuItem, type Store } from "./mealme";
-import { PlacesError, findAnchor, milesBetween, placesConfigured, searchPlaces, zipAt, type Anchor, type Place, type Point } from "./places";
+import { PlacesError, findAnchor, milesBetween, placesConfigured, searchPlaces, zipAt, type Anchor, type Place, type Point, type TravelMode } from "./places";
 
 /**
  * Wally's brain: one function that reads a thread and answers it with
@@ -39,7 +39,9 @@ export interface Guest {
 
 const FINDING_WITH_PLACES = `# Finding places
 - When the person wants somewhere to eat, drink, order from or pick up from, call find_places. It searches real, current listings near their saved address and tells you how far each is and whether it is open right now.
-- When they name somewhere to look around (a landmark, venue, theater, stadium, hotel, neighborhood, city or ZIP: "near the Pantages theater in Hollywood", "in Silver Lake", "by LAX"), pass it as area, whether or not they have a saved address. The search then centers there and every distance is measured from it: the results say so in miles_from, and the cards show it. Orient the whole answer around that spot, as a waiter who knows the block would: say which picks are an easy walk from it (walkable) and which mean a short drive, then what each is known for. Never mention their saved address or where they live in that answer, and never say the distances are from anywhere but the named spot.
+- Results carry travel ("6 min walk" or "12 min drive", from Google's own routing) beside miles. Use travel in your words, never a straight-line mile count: "a six-minute walk", "about fifteen minutes' drive". The cards show it too.
+- When they name somewhere to look around (a landmark, venue, theater, stadium, hotel, neighborhood, city or ZIP: "near the Pantages theater in Hollywood", "in Silver Lake", "by LAX"), pass it as area, whether or not they have a saved address. The search then centers there and every distance and walk time is measured from it: the results say so in miles_from, and the cards show it. Orient the whole answer around that spot, as a waiter who knows the block would: say which picks are an easy walk from it (walkable) and which mean a short drive, then what each is known for. Never mention their saved address or where they live in that answer, and never say the distances are from anywhere but the named spot.
+- takeout, delivery, dine_in and reservable say what each listing offers. When someone wants pickup, takeout or something to bring home, show places with takeout true (or unknown) and never one marked false; for delivery, likewise with delivery; and say which of your picks offer what in a few words when it decides the choice. A place marked dine_in only is for eating there.
 - If they have no saved address (see the guest notes) and haven't named somewhere, ask them in one short line to add their address in the bar at the top of the page, or to name an area.
 - Results near the saved address are held to about 25 miles around it; around a named spot, a few miles. If nothing fits, say so and offer to look in a named area, or further out.
 - Don't announce that you're going to look. Just call the tool.
@@ -418,11 +420,21 @@ export function shownPlaces(thread: ChatMessage[]): Set<string> {
   return new Set(thread.flatMap((m) => (m.choices ?? []).flatMap((c) => (c.place ? [c.place.id] : []))));
 }
 
-/** "9:00 PM" in the person's time zone. Without a time zone the hour would be a guess, so there is none. */
+/** "9:00 PM" in the person's time zone, or the place's own when the person's isn't known (a texter). Without either the hour would be a guess, so there is none. */
 function closingTime(iso: string | null, timeZone: string | undefined): string | undefined {
   if (!iso || !timeZone) return undefined;
-  return new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit", timeZone }).format(new Date(iso));
+  try {
+    return new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit", timeZone }).format(new Date(iso));
+  } catch {
+    return undefined;
+  }
 }
+
+/** "6 min walk" or "12 min drive", as the cards and Claude see it. */
+export const travelLine = (travel: Place["travel"]) => (travel ? `${travel.minutes} min ${travel.mode === "WALK" ? "walk" : "drive"}` : undefined);
+
+/** A walk short enough to suggest without comment. */
+export const WALK_MINUTES = 15;
 
 /** What Claude is told about the places a search found, keyed by a short id it can quote back. */
 export function describePlaces(found: ReadonlyMap<string, FoundPlace>, ids: string[], timeZone?: string): string {
@@ -435,9 +447,14 @@ export function describePlaces(found: ReadonlyMap<string, FoundPlace>, ids: stri
       known_for: p.summary || undefined,
       miles: p.miles,
       miles_from: p.from,
-      walkable: p.from && p.miles !== undefined ? p.miles <= WALK_MILES : undefined,
+      travel: travelLine(p.travel),
+      walkable: p.travel ? (p.travel.mode === "WALK" ? p.travel.minutes <= WALK_MINUTES : undefined) : p.from && p.miles !== undefined ? p.miles <= WALK_MILES : undefined,
       open_now: p.open ?? "unknown",
-      closes: closingTime(p.closes, timeZone),
+      closes: closingTime(p.closes, timeZone ?? p.timeZone ?? undefined),
+      takeout: p.takeout ?? undefined,
+      delivery: p.delivery ?? undefined,
+      dine_in: p.dineIn ?? undefined,
+      reservable: p.reservable ?? undefined,
       rating: p.rating ?? undefined,
       ratings: p.ratings ?? undefined,
       price: p.price ?? undefined,
@@ -476,6 +493,7 @@ export function placeChoices(input: unknown, found: ReadonlyMap<string, FoundPla
         id: place.id,
         ...(place.miles !== undefined ? { miles: place.miles } : {}),
         ...(place.from ? { from: place.from } : {}),
+        ...(place.travel ? { travel: { mode: place.travel.mode, minutes: place.travel.minutes } } : {}),
         ...(place.open !== null ? { open: place.open } : {}),
         ...(place.rating !== null ? { rating: place.rating } : {}),
         ...(place.price ? { price: place.price } : {}),
@@ -485,7 +503,8 @@ export function placeChoices(input: unknown, found: ReadonlyMap<string, FoundPla
       },
     });
   }
-  choices.sort((a, b) => openRank(a.place!.open) - openRank(b.place!.open) || (a.place!.miles ?? Infinity) - (b.place!.miles ?? Infinity));
+  const nearness = (c: Choice) => c.place!.travel?.minutes ?? (c.place!.miles !== undefined ? c.place!.miles * 100 : Infinity);
+  choices.sort((a, b) => openRank(a.place!.open) - openRank(b.place!.open) || nearness(a) - nearness(b));
   return choices.length ? choices.slice(0, MAX_CHOICES) : null;
 }
 
@@ -498,7 +517,8 @@ export function placesIntro(input: unknown, choices: Choice[]): string {
   const written = clip((input as { intro?: unknown } | null)?.intro, 400);
   if (written) return written;
   const top = choices[0]!;
-  const why = [top.place?.miles !== undefined && `${top.place.miles} miles ${top.place.from ? `from ${top.place.from}` : "away"}`, top.place?.open === true && "open now", top.place?.rating !== undefined && `rated ${top.place.rating.toFixed(1)}`].filter(Boolean);
+  const how = top.place?.travel ? `a ${travelLine(top.place.travel as Place["travel"])}` : top.place?.miles !== undefined ? `${top.place.miles} miles` : undefined;
+  const why = [how && `${how} ${top.place?.from ? `from ${top.place.from}` : "away"}`, top.place?.open === true && "open now", top.place?.rating !== undefined && `rated ${top.place.rating.toFixed(1)}`].filter(Boolean);
   return `I'd start with ${top.title}${why.length ? `: ${why.join(", ")}` : ""}.${choices.length > 1 ? " A few more worth a look are below." : ""}`;
 }
 
@@ -576,7 +596,7 @@ export async function reply(thread: ChatMessage[], guest: Guest, channel: Channe
     const matches = await Promise.all(
       picked.map(async (store) => {
         if (!placesConfigured()) return null;
-        const places = await searchPlaces({ query: `${store.name} ${store.address}`.trim(), near: guest.near, limit: 3 }).catch(() => [] as Place[]);
+        const places = await searchPlaces({ query: `${store.name} ${store.address}`.trim(), near: guest.near, limit: 3, travel: guest.near ? { from: guest.near, mode: "DRIVE" } : null }).catch(() => [] as Place[]);
         return places.find((p) => sameStore(p, store)) ?? null;
       }),
     );
@@ -595,6 +615,11 @@ export async function reply(thread: ChatMessage[], guest: Guest, channel: Channe
         price: null,
         website: null,
         maps: `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${store.name} ${store.address}`.trim())}`,
+        takeout: true,
+        delivery: null,
+        dineIn: null,
+        reservable: null,
+        timeZone: null,
       };
       const miles = guest.near && place.point ? milesBetween(guest.near, place.point) : store.miles;
       found.set(place.id, { ...place, ...(miles !== undefined ? { miles } : {}), ...(shown.has(place.id) ? { shown: true } : {}), orders: true });
@@ -617,8 +642,13 @@ export async function reply(thread: ChatMessage[], guest: Guest, channel: Channe
       const anchor: Anchor | null = area ? await findAnchor(area).catch(() => null) : null;
       const origin = anchor?.point ?? (area ? null : guest.near);
       const from = anchor ? anchor.name.slice(0, FROM_CHARS) : undefined;
+      // Around a spot someone named, what matters is the walk; from home or across a city, the drive.
+      const mode: TravelMode = anchor && !anchor.wide ? "WALK" : "DRIVE";
       // Places near the saved address are checked against the restaurants Wally can order from (not a named area elsewhere).
-      const [places, stores] = await Promise.all([searchPlaces({ query, area: area || undefined, anchor, near: guest.near, openNow: args.open_now === true }), area ? [] : orderableStores()]);
+      const [places, stores] = await Promise.all([
+        searchPlaces({ query, area: area || undefined, anchor, near: guest.near, openNow: args.open_now === true, travel: origin ? { from: origin, mode } : null }),
+        area ? [] : orderableStores(),
+      ]);
       const ids = places.map((place) => {
         const id = `p${found.size + 1}`;
         const orders = stores.some((store) => sameStore(place, store));

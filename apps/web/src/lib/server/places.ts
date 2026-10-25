@@ -41,6 +41,25 @@ export interface Place {
   price: string | null;
   website: string | null;
   maps: string;
+  /** Whether the place offers takeout, delivery, dining in, or takes reservations. Null when Google doesn't say. */
+  takeout: boolean | null;
+  delivery: boolean | null;
+  dineIn: boolean | null;
+  reservable: boolean | null;
+  /** The place's IANA time zone, so closing times can be phrased for someone whose own zone isn't known (a texter). */
+  timeZone: string | null;
+  /** How long it takes to get there from the search's origin by road or on foot, when the search asked. */
+  travel?: Travel;
+}
+
+export type TravelMode = "WALK" | "DRIVE";
+
+export interface Travel {
+  mode: TravelMode;
+  /** Whole minutes, at least 1. */
+  minutes: number;
+  /** Road or path miles, to one decimal place. */
+  miles: number;
 }
 
 interface RawPlace {
@@ -59,6 +78,16 @@ interface RawPlace {
   googleMapsUri?: string;
   businessStatus?: string;
   types?: string[];
+  takeout?: boolean;
+  delivery?: boolean;
+  dineIn?: boolean;
+  reservable?: boolean;
+  timeZone?: { id?: string };
+}
+
+/** One per place, in the same order, when the search asked for travel times. Empty for a place Google can't route to. */
+interface RawRoutingSummary {
+  legs?: { duration?: string; distanceMeters?: number }[];
 }
 
 const PRICE: Record<string, string> = {
@@ -68,14 +97,19 @@ const PRICE: Record<string, string> = {
   PRICE_LEVEL_VERY_EXPENSIVE: "$$$$",
 };
 
-async function searchText(body: Record<string, unknown>, fields: string[]): Promise<RawPlace[]> {
+/**
+ * One Text Search. `fields` are place fields; `top` are fields beside the
+ * places list, such as routingSummaries. The field mask is what Google bills
+ * by: see "Places" in CLAUDE.md before adding one.
+ */
+async function searchText(body: Record<string, unknown>, fields: string[], top: string[] = []): Promise<{ places: RawPlace[]; routingSummaries: RawRoutingSummary[] }> {
   const key = process.env.GOOGLE_MAPS_API_KEY?.trim();
   if (!key) throw new PlacesError("places not configured");
   let res: Response;
   try {
     res = await fetch(endpoint(), {
       method: "POST",
-      headers: { "Content-Type": "application/json", "X-Goog-Api-Key": key, "X-Goog-FieldMask": fields.map((f) => `places.${f}`).join(",") },
+      headers: { "Content-Type": "application/json", "X-Goog-Api-Key": key, "X-Goog-FieldMask": [...fields.map((f) => `places.${f}`), ...top].join(",") },
       body: JSON.stringify(body),
       cache: "no-store",
       signal: AbortSignal.timeout(8000),
@@ -89,7 +123,16 @@ async function searchText(body: Record<string, unknown>, fields: string[]): Prom
     console.error(`[places] ${res.status} ${(await res.text().catch(() => "")).replace(/\s+/g, " ").slice(0, 300)}`);
     throw new PlacesError(String(res.status));
   }
-  return ((await res.json()) as { places?: RawPlace[] }).places ?? [];
+  const data = (await res.json()) as { places?: RawPlace[]; routingSummaries?: RawRoutingSummary[] };
+  return { places: data.places ?? [], routingSummaries: data.routingSummaries ?? [] };
+}
+
+/** The travel time Google gave for a place, as whole minutes and road miles. Undefined when it gave none. */
+function travelOf(summary: RawRoutingSummary | undefined, mode: TravelMode): Travel | undefined {
+  const leg = summary?.legs?.[0];
+  const seconds = Number.parseFloat(leg?.duration ?? "");
+  if (!leg || !Number.isFinite(seconds) || typeof leg.distanceMeters !== "number") return undefined;
+  return { mode, minutes: Math.max(1, Math.round(seconds / 60)), miles: Math.round((leg.distanceMeters / 1609.344) * 10) / 10 };
 }
 
 const pointOf = (raw: RawPlace): Point | null =>
@@ -124,7 +167,7 @@ export async function zipAt(point: Point): Promise<string | undefined> {
 
 /** Turns a typed address into Google's spelling of it and its coordinates. Null if Google can't place it. */
 export async function findAddress(typed: string): Promise<{ address: string; point: Point } | null> {
-  const [first] = await searchText({ textQuery: typed, pageSize: 1 }, ["formattedAddress", "location"]);
+  const [first] = (await searchText({ textQuery: typed, pageSize: 1 }, ["formattedAddress", "location"])).places;
   const point = first && pointOf(first);
   return first?.formattedAddress && point ? { address: first.formattedAddress, point } : null;
 }
@@ -206,7 +249,7 @@ export interface Anchor {
  * Null if Google can't place it. Nothing is stored.
  */
 export async function findAnchor(named: string): Promise<Anchor | null> {
-  const [first] = await searchText({ textQuery: named, pageSize: 1 }, ["displayName", "location", "types"]);
+  const [first] = (await searchText({ textQuery: named, pageSize: 1 }, ["displayName", "location", "types"])).places;
   const point = first && pointOf(first);
   if (!first?.displayName?.text || !point) return null;
   return { name: first.displayName.text.trim(), point, wide: (first.types ?? []).some((t) => CITY_TYPES.has(t)) };
@@ -246,24 +289,35 @@ export interface PlaceSearch {
   openNow?: boolean;
   /** Fewer results than a full page, for a lookup of one named place. */
   limit?: number;
+  /** Ask Google how long each place takes to reach from here, on foot or by road. Costs nothing extra within the search's billing tier. */
+  travel?: { from: Point; mode: TravelMode } | null;
 }
+
+/** The place fields a search asks for. Together they put a search in the Enterprise + Atmosphere tier; the service and travel fields ride in that tier for free. */
+const SEARCH_FIELDS = ["id", "displayName", "shortFormattedAddress", "formattedAddress", "primaryTypeDisplayName", "editorialSummary", "location", "currentOpeningHours", "rating", "userRatingCount", "priceLevel", "websiteUri", "googleMapsUri", "businessStatus", "takeout", "delivery", "dineIn", "reservable", "timeZone"];
+
+const flag = (value: boolean | undefined): boolean | null => (typeof value === "boolean" ? value : null);
 
 /** Food and drink places matching the search, in Google's order. */
 export async function searchPlaces(search: PlaceSearch): Promise<Place[]> {
   const area = search.area?.trim();
   const anchor = search.anchor ?? null;
-  const raw = await searchText(
+  const travel = search.travel ?? null;
+  const { places: raw, routingSummaries } = await searchText(
     {
       textQuery: area && !anchor ? `${withoutNearMe(search.query)} near ${area}` : withoutNearMe(search.query),
       pageSize: search.limit ?? PAGE_SIZE,
       ...(search.openNow ? { openNow: true } : {}),
       ...(anchor ? { locationRestriction: boxAround(anchor.point, anchor.wide ? AROUND_CITY_MILES : AROUND_SPOT_MILES) } : !area && search.near ? { locationRestriction: boxAround(search.near) } : {}),
+      ...(travel ? { routingParameters: { origin: { latitude: travel.from.lat, longitude: travel.from.lng }, travelMode: travel.mode } } : {}),
     },
-    ["id", "displayName", "shortFormattedAddress", "formattedAddress", "primaryTypeDisplayName", "editorialSummary", "location", "currentOpeningHours", "rating", "userRatingCount", "priceLevel", "websiteUri", "googleMapsUri", "businessStatus"],
+    SEARCH_FIELDS,
+    travel ? ["routingSummaries"] : [],
   );
   return raw
-    .filter((p) => p.id && p.displayName?.text && (!p.businessStatus || p.businessStatus === "OPERATIONAL"))
-    .map((p) => ({
+    .map((p, i) => ({ p, travel: travel ? travelOf(routingSummaries[i], travel.mode) : undefined }))
+    .filter(({ p }) => p.id && p.displayName?.text && (!p.businessStatus || p.businessStatus === "OPERATIONAL"))
+    .map(({ p, travel }) => ({
       id: p.id!,
       name: p.displayName!.text!.trim(),
       address: p.shortFormattedAddress ?? p.formattedAddress ?? "",
@@ -278,6 +332,12 @@ export async function searchPlaces(search: PlaceSearch): Promise<Place[]> {
       website: httpsUrl(p.websiteUri),
       // The place's page on Google Maps. If Google sent none, the place ID still finds it.
       maps: httpsUrl(p.googleMapsUri) ?? `https://www.google.com/maps/place/?q=place_id:${encodeURIComponent(p.id!)}`,
+      takeout: flag(p.takeout),
+      delivery: flag(p.delivery),
+      dineIn: flag(p.dineIn),
+      reservable: flag(p.reservable),
+      timeZone: p.timeZone?.id?.trim() || null,
+      ...(travel ? { travel } : {}),
     }));
 }
 
