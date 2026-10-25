@@ -44,8 +44,10 @@ export function ticketLines(t: TicketInfo): string[] {
 export interface PlaceInfo {
   /** Google's place ID. */
   id: string;
-  /** Straight-line miles from the person's saved address. */
+  /** Straight-line miles from the person's saved address, or from `from` when that is set. */
   miles?: number;
+  /** Where `miles` is measured from when it isn't the saved address: the landmark, venue or area the person named ("Pantages Theatre"). */
+  from?: string;
   /** Open when Wally answered. Only meaningful while the message is fresh. */
   open?: boolean;
   rating?: number;
@@ -90,7 +92,7 @@ export const MAX_MESSAGE_CHARS = 2000;
 export function asPlainText(message: Pick<ChatMessage, "content" | "choices">): string {
   const list = (message.choices ?? []).map((c, i) => {
     if (c.ticket) return `${i + 1}. Order at ${c.ticket.restaurant}: ${ticketLines(c.ticket).join("; ")} ${c.ticket.checkoutUrl}`;
-    const facts = [c.place?.miles !== undefined && `${c.place.miles} mi`, c.place?.open === true && "open", c.place?.open === false && "closed", c.place?.orders && "order with Wally"].filter(Boolean);
+    const facts = [c.place?.miles !== undefined && `${c.place.miles} mi${c.place.from ? ` from ${c.place.from}` : ""}`, c.place?.open === true && "open", c.place?.open === false && "closed", c.place?.orders && "order with Wally"].filter(Boolean);
     const link = c.place?.website ?? c.place?.maps ?? c.url;
     return `${i + 1}. ${c.title}${facts.length ? ` (${facts.join(", ")})` : ""}${c.detail ? `: ${c.detail}` : ""}${link ? ` ${link}` : ""}`;
   });
@@ -138,7 +140,7 @@ export function asTexts(message: Pick<ChatMessage, "content" | "choices">, origi
     const facts = [
       p?.open === true && "Open now",
       p?.open === false && "Closed",
-      p?.miles !== undefined && `${p.miles} mi`,
+      p?.miles !== undefined && `${p.miles} mi${p.from ? ` from ${p.from}` : ""}`,
       p?.rating !== undefined && `★ ${p.rating.toFixed(1)}`,
       p?.price,
       p?.orders && "🧾 Order with Wally",

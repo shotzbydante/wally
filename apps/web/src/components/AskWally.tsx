@@ -665,8 +665,8 @@ function WallyTurn({
                       {c.place?.orders && <OrderCheck />}
                     </span>
                     {c.place?.miles !== undefined && (
-                      <span className="shrink-0 text-[0.8rem] font-semibold text-ink-soft tabular-nums">
-                        {c.place.miles} mi<span className="sr-only"> away</span>
+                      <span className="shrink-0 text-[0.8rem] font-semibold text-ink-soft tabular-nums" title={c.place.from ? `${c.place.miles} miles from ${c.place.from}` : undefined}>
+                        {c.place.miles} mi{c.place.from ? <span className="font-normal"> from {c.place.from}</span> : <span className="sr-only"> away</span>}
                       </span>
                     )}
                   </span>
