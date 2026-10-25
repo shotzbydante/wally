@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cityOf, deliveryLinks } from "@/lib/chat";
 import { describePlaces, placeChoices, placesIntro, shownPlaces, type FoundPlace } from "./agent";
-import { findAddress, milesBetween, searchPlaces, suggestAddresses } from "./places";
+import { findAddress, findAnchor, milesBetween, searchPlaces, suggestAddresses } from "./places";
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -59,9 +59,32 @@ describe("searchPlaces", () => {
     await searchPlaces({ query: "dessert", near: home, area: "Koreatown" });
     expect(calls[0]!.body).toEqual({ textQuery: "dessert near Koreatown", pageSize: 20 });
   });
+  it("holds a search to a few miles around a named spot once it has been placed, further around a city", async () => {
+    const calls = google([]);
+    const pantages = { name: "Pantages Theatre", point: { lat: 34.1019, lng: -118.3265 }, wide: false };
+    await searchPlaces({ query: "burgers near the theater", near: home, area: "Pantages Theatre, Hollywood", anchor: pantages });
+    expect(calls[0]!.body).toEqual({ textQuery: "burgers near the theater", pageSize: 20, locationRestriction: { rectangle: { low: { latitude: 34.0439, longitude: -118.3965 }, high: { latitude: 34.1599, longitude: -118.2565 } } } });
+    await searchPlaces({ query: "burgers", area: "Fresno", anchor: { ...pantages, name: "Fresno", wide: true } });
+    const box = (calls[1]!.body.locationRestriction as { rectangle: { low: { latitude: number }; high: { latitude: number } } }).rectangle;
+    expect(Math.round((box.high.latitude - box.low.latitude) * 69)).toBe(20);
+  });
   it("throws when Google refuses", async () => {
     google([], 403);
     await expect(searchPlaces({ query: "dessert" })).rejects.toThrow("403");
+  });
+});
+
+describe("findAnchor", () => {
+  it("places a named venue at the cheapest tier and tells a city from a spot", async () => {
+    const calls = google([{ displayName: { text: " Pantages Theatre " }, location: { latitude: 34.1019, longitude: -118.3265 }, types: ["performing_arts_theater", "point_of_interest"] }]);
+    expect(await findAnchor("Pantages theater in Hollywood")).toEqual({ name: "Pantages Theatre", point: { lat: 34.1019, lng: -118.3265 }, wide: false });
+    expect(calls[0]).toMatchObject({ headers: { "X-Goog-FieldMask": "places.displayName,places.location,places.types" }, body: { textQuery: "Pantages theater in Hollywood", pageSize: 1 } });
+    google([{ displayName: { text: "Fresno" }, location: { latitude: 36.7378, longitude: -119.7871 }, types: ["locality", "political"] }]);
+    expect(await findAnchor("Fresno")).toMatchObject({ name: "Fresno", wide: true });
+  });
+  it("is null when Google can't place it", async () => {
+    google([]);
+    expect(await findAnchor("nowhere in particular")).toBeNull();
   });
 });
 
@@ -127,6 +150,21 @@ describe("place cards", () => {
       { id: "p4", name: "Unknown Hours", kind: "Bakery", miles: 0.9, open_now: "unknown", rating: 4.5, ratings: 10, address: "1 Main St" },
     ]);
     expect(describePlaces(found, [])).toMatch(/No places matched/);
+  });
+  it("says what distances are measured from when the person named a spot, and which are a walk", () => {
+    const near = new Map<string, FoundPlace>([
+      ["p1", { ...place("a", "Carney's", true, 0.3), from: "Pantages Theatre" }],
+      ["p2", { ...place("b", "Mel's", true, 1.4), from: "Pantages Theatre" }],
+    ]);
+    expect(JSON.parse(describePlaces(near, ["p1", "p2"]))).toMatchObject([
+      { name: "Carney's", miles: 0.3, miles_from: "Pantages Theatre", walkable: true },
+      { name: "Mel's", miles: 1.4, miles_from: "Pantages Theatre", walkable: false },
+    ]);
+    const cards = placeChoices(pick("p2", "p1"), near)!;
+    expect(cards[0]!.place).toMatchObject({ miles: 0.3, from: "Pantages Theatre" });
+    expect(placesIntro({}, cards)).toBe("I'd start with Carney's: 0.3 miles from Pantages Theatre, open now, rated 4.5. A few more worth a look are below.");
+    // Near the saved address nothing is said about where from.
+    expect(JSON.parse(describePlaces(found, ["p1"]))[0]).not.toHaveProperty("miles_from");
   });
   it("tells Claude when a place closes, in the person's time, and which he has already shown", () => {
     const again = new Map<string, FoundPlace>([["p1", { ...place("near", "Near Open", true, 0.4), closes: "2026-10-13T04:00:00Z", shown: true, summary: "Known for layer cakes." }]]);

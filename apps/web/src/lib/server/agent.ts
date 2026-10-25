@@ -2,7 +2,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { CURRENT_LOCATION, asPlainText, cityOf, hostOf, isOwnSite, withSources, type ChatMessage, type Choice, type Source } from "@/lib/chat";
 import type { Channel } from "./conversation";
 import { MealMeError, checkout, mealmeConfigured, nameMatches, sameStore, searchMenu, searchStores, zipOf, type MenuItem, type Store } from "./mealme";
-import { PlacesError, milesBetween, placesConfigured, searchPlaces, zipAt, type Place, type Point } from "./places";
+import { PlacesError, findAnchor, milesBetween, placesConfigured, searchPlaces, zipAt, type Anchor, type Place, type Point } from "./places";
 
 /**
  * Wally's brain: one function that reads a thread and answers it with
@@ -39,15 +39,16 @@ export interface Guest {
 
 const FINDING_WITH_PLACES = `# Finding places
 - When the person wants somewhere to eat, drink, order from or pick up from, call find_places. It searches real, current listings near their saved address and tells you how far each is and whether it is open right now.
-- If they have no saved address (see the guest notes) and haven't named a neighborhood, city or ZIP, ask them in one short line to add their address in the bar at the top of the page, or to name an area. If they name an area, pass it as area.
-- Results are held to about 25 miles around their saved address. If nothing fits, say so and offer to look in a named area.
+- When they name somewhere to look around (a landmark, venue, theater, stadium, hotel, neighborhood, city or ZIP: "near the Pantages theater in Hollywood", "in Silver Lake", "by LAX"), pass it as area, whether or not they have a saved address. The search then centers there and every distance is measured from it: the results say so in miles_from, and the cards show it. Orient the whole answer around that spot, as a waiter who knows the block would: say which picks are an easy walk from it (walkable) and which mean a short drive, then what each is known for. Never mention their saved address or where they live in that answer, and never say the distances are from anywhere but the named spot.
+- If they have no saved address (see the guest notes) and haven't named somewhere, ask them in one short line to add their address in the bar at the top of the page, or to name an area.
+- Results near the saved address are held to about 25 miles around it; around a named spot, a few miles. If nothing fits, say so and offer to look in a named area, or further out.
 - Don't announce that you're going to look. Just call the tool.
 - Then call show_places with the ids of the four that fit best (fewer only if fewer fit), favoring places that are open and close by. For each place give a few words on what it is or is known for. The card already shows distance, open or closed, rating and price, so never repeat those in a card's line.
 - Every show_places call must carry your recommendation in its intro field. It is shown above the cards, and cards never go out without it. Don't also type it as a message before the tool.
-- The intro is one or two sentences, under 40 words, in your own voice: a waiter who has opinions and enjoys this. Lead with your top pick by name and why, using what find_places told you (what it's known for, it's the closest, it's still open and until when, it's the best rated, its price). You may add one more standout. A little warmth or wit is welcome ("If it were my night off, I'd head to..."); a dry list of facts is not. Don't walk through every place; the cards do that.
+- The intro is one or two sentences, under 40 words (up to 70, in three sentences, when the search was around a named spot, so the walk-or-drive picture and the quality of the picks both fit), in your own voice: a waiter who has opinions and enjoys this. Lead with your top pick by name and why, using what find_places told you (what it's known for, it's the closest, it's still open and until when, it's the best rated, its price). You may add one more standout. A little warmth or wit is welcome ("If it were my night off, I'd head to..."); a dry list of facts is not. Don't walk through every place; the cards do that.
 - known_for is the listing's own description of a place. When a place has one, use it: say what the place is known for in your recommendation and in its card's reason, in your own few words. It is the only thing you know about what a place serves. If a place has no known_for, don't guess one.
 - Always call a place by its name. If a listing's name is only a neighborhood or city, add what kind of place it is ("the Mexican spot listed as West Hollywood"), so it never reads as if you were recommending the neighborhood.
-- In the intro, give at most two facts about your pick. Don't recite its distance, rating and price together; the cards show them.
+- In the intro, give at most two facts about your pick. Don't recite its distance, rating and price together; the cards show them. Around a named spot, walk or drive from it counts as the fact that matters most.
 - Say only what find_places told you about a place. Never add an address, hours, price, dish, menu item or review from memory. You don't know what any place has on its menu or in stock today, so never say a dish or cake is available.
 - When the person asks to see more, call find_places again with the same query, then show the next four that are not marked already_shown. If everything is already_shown, try one different wording of the query. If there is still nothing new, say that's everything nearby and offer to widen the search. The intro for these can be shorter, but is still required.
 - Give the person real choice. Look past the obvious names: neighborhood and independent places belong beside the well-known ones. When two places fit equally well, pick the independent one with its own site (own_site in the results) over a chain.
@@ -161,12 +162,12 @@ const CHOICES_TOOL: Anthropic.Tool = {
 const FIND_PLACES_TOOL: Anthropic.Tool = {
   name: "find_places",
   description:
-    "Search real, current listings for places to eat or drink. Returns up to 20 places with an id, name, kind, known_for (what the listing says the place is known for, when it says), distance in miles from the person's saved address, whether it is open right now and when it closes, rating, price, own_site when the restaurant has a site of its own, and already_shown when you have shown it earlier in this conversation. Searches near the saved address unless you pass area.",
+    "Search real, current listings for places to eat or drink. Returns up to 20 places with an id, name, kind, known_for (what the listing says the place is known for, when it says), distance in miles from the person's saved address (or from the named area: miles_from says which, and walkable marks an easy walk from it), whether it is open right now and when it closes, rating, price, own_site when the restaurant has a site of its own, and already_shown when you have shown it earlier in this conversation. Searches near the saved address unless you pass area.",
   input_schema: {
     type: "object",
     properties: {
       query: { type: "string", description: "What to look for, in a few words: 'dessert', 'ramen', 'late night tacos', or a restaurant's name." },
-      area: { type: "string", description: "A neighborhood, city or ZIP the person named in their latest message. Only when they have no saved address or are plainly asking about somewhere else. Never for 'near me'." },
+      area: { type: "string", description: "The place to search around, when the person named one in their latest message: a landmark, venue, theater, stadium, hotel, neighborhood, city or ZIP, as they put it plus the city if they gave one ('Pantages Theatre, Hollywood', 'Silver Lake, Los Angeles', '93720'). Pass it whenever they name somewhere, even with a saved address. Never for 'near me' or 'nearby'." },
       open_now: { type: "boolean", description: "True to return only places open right now. Use it when they want to eat now." },
     },
     required: ["query"],
@@ -404,8 +405,13 @@ export function readWeb(blocks: Anthropic.ContentBlock[]): { cited: Source[]; fo
   return { cited, found };
 }
 
-/** A place found this turn, with its distance from the saved address, whether an earlier answer already showed it, and whether Wally can order there. */
-export type FoundPlace = Place & { miles?: number; shown?: boolean; orders?: boolean };
+/** A place found this turn, with its distance from the saved address (or from `from`, a spot the person named), whether an earlier answer already showed it, and whether Wally can order there. */
+export type FoundPlace = Place & { miles?: number; from?: string; shown?: boolean; orders?: boolean };
+
+/** Straight-line miles within which a place counts as an easy walk from a named spot. */
+export const WALK_MILES = 0.8;
+/** How long a named spot's name may run on a card. */
+const FROM_CHARS = 28;
 
 /** Google's ids of the places already shown on cards in this conversation, so "see more" brings new ones. */
 export function shownPlaces(thread: ChatMessage[]): Set<string> {
@@ -428,6 +434,8 @@ export function describePlaces(found: ReadonlyMap<string, FoundPlace>, ids: stri
       kind: p.kind || undefined,
       known_for: p.summary || undefined,
       miles: p.miles,
+      miles_from: p.from,
+      walkable: p.from && p.miles !== undefined ? p.miles <= WALK_MILES : undefined,
       open_now: p.open ?? "unknown",
       closes: closingTime(p.closes, timeZone),
       rating: p.rating ?? undefined,
@@ -467,6 +475,7 @@ export function placeChoices(input: unknown, found: ReadonlyMap<string, FoundPla
       place: {
         id: place.id,
         ...(place.miles !== undefined ? { miles: place.miles } : {}),
+        ...(place.from ? { from: place.from } : {}),
         ...(place.open !== null ? { open: place.open } : {}),
         ...(place.rating !== null ? { rating: place.rating } : {}),
         ...(place.price ? { price: place.price } : {}),
@@ -489,7 +498,7 @@ export function placesIntro(input: unknown, choices: Choice[]): string {
   const written = clip((input as { intro?: unknown } | null)?.intro, 400);
   if (written) return written;
   const top = choices[0]!;
-  const why = [top.place?.miles !== undefined && `${top.place.miles} miles away`, top.place?.open === true && "open now", top.place?.rating !== undefined && `rated ${top.place.rating.toFixed(1)}`].filter(Boolean);
+  const why = [top.place?.miles !== undefined && `${top.place.miles} miles ${top.place.from ? `from ${top.place.from}` : "away"}`, top.place?.open === true && "open now", top.place?.rating !== undefined && `rated ${top.place.rating.toFixed(1)}`].filter(Boolean);
   return `I'd start with ${top.title}${why.length ? `: ${why.join(", ")}` : ""}.${choices.length > 1 ? " A few more worth a look are below." : ""}`;
 }
 
@@ -604,12 +613,16 @@ export async function reply(thread: ChatMessage[], guest: Guest, channel: Channe
     }
     if (++placeSearches > MAX_PLACE_SEARCHES) return { content: "No more searches for this message. Answer with what you have.", is_error: true };
     try {
+      // A named spot is looked up first, so the search centers on it and distances are measured from it, not from the saved address.
+      const anchor: Anchor | null = area ? await findAnchor(area).catch(() => null) : null;
+      const origin = anchor?.point ?? (area ? null : guest.near);
+      const from = anchor ? anchor.name.slice(0, FROM_CHARS) : undefined;
       // Places near the saved address are checked against the restaurants Wally can order from (not a named area elsewhere).
-      const [places, stores] = await Promise.all([searchPlaces({ query, area: area || undefined, near: guest.near, openNow: args.open_now === true }), area ? [] : orderableStores()]);
+      const [places, stores] = await Promise.all([searchPlaces({ query, area: area || undefined, anchor, near: guest.near, openNow: args.open_now === true }), area ? [] : orderableStores()]);
       const ids = places.map((place) => {
         const id = `p${found.size + 1}`;
         const orders = stores.some((store) => sameStore(place, store));
-        found.set(id, { ...place, ...(guest.near && place.point ? { miles: milesBetween(guest.near, place.point) } : {}), ...(shown.has(place.id) ? { shown: true } : {}), ...(orders ? { orders: true } : {}) });
+        found.set(id, { ...place, ...(origin && place.point ? { miles: milesBetween(origin, place.point), ...(from ? { from } : {}) } : {}), ...(shown.has(place.id) ? { shown: true } : {}), ...(orders ? { orders: true } : {}) });
         return id;
       });
       // An orderable store named for what was asked ("Poke Bar" for "poke") belongs in the answer even when Google's twenty left it out.

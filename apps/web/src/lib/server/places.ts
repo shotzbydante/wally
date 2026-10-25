@@ -58,6 +58,7 @@ interface RawPlace {
   websiteUri?: string;
   googleMapsUri?: string;
   businessStatus?: string;
+  types?: string[];
 }
 
 const PRICE: Record<string, string> = {
@@ -182,13 +183,41 @@ export async function suggestAddresses(typed: string, options: { near?: Point | 
 
 /** How far from the saved address a search may reach, in miles each way. */
 const NEARBY_MILES = 25;
+/** How far around a named landmark, venue or neighborhood a search may reach. */
+const AROUND_SPOT_MILES = 4;
+/** How far around a named city or town. */
+const AROUND_CITY_MILES = 10;
+
+/** Google's types for a whole city, town or larger: a search "near" one of these reaches further than around a venue. */
+const CITY_TYPES = new Set(["locality", "sublocality", "postal_town", "administrative_area_level_1", "administrative_area_level_2", "administrative_area_level_3", "postal_code", "country"]);
+
+/** A named place to search around, and how far around it a search should reach. */
+export interface Anchor {
+  /** What Google calls it: "Pantages Theatre", "Fresno". */
+  name: string;
+  point: Point;
+  /** True for a city, town, ZIP or region, which stands for a wider area than a venue or neighborhood does. */
+  wide: boolean;
+}
+
+/**
+ * Where a named area, landmark or venue is ("Pantages theater in Hollywood",
+ * "Silver Lake", "Fresno"), by one Places lookup at the cheapest tier.
+ * Null if Google can't place it. Nothing is stored.
+ */
+export async function findAnchor(named: string): Promise<Anchor | null> {
+  const [first] = await searchText({ textQuery: named, pageSize: 1 }, ["displayName", "location", "types"]);
+  const point = first && pointOf(first);
+  if (!first?.displayName?.text || !point) return null;
+  return { name: first.displayName.text.trim(), point, wide: (first.types ?? []).some((t) => CITY_TYPES.has(t)) };
+}
 
 /**
  * The box around a point that a nearby search is held to. A lean toward the
  * point isn't enough: Google will still answer with a bigger city's places.
  */
-function boxAround(point: Point) {
-  const lat = NEARBY_MILES / 69;
+function boxAround(point: Point, miles = NEARBY_MILES) {
+  const lat = miles / 69;
   const lng = lat / Math.max(Math.cos((point.lat * Math.PI) / 180), 0.2);
   const round = (n: number) => Math.round(n * 1e4) / 1e4;
   return {
@@ -210,8 +239,10 @@ export interface PlaceSearch {
   query: string;
   /** Search only around here. */
   near?: Point | null;
-  /** A neighbourhood, city or ZIP the person named, searched instead of `near`. */
+  /** A neighbourhood, city or ZIP the person named, searched instead of `near`. Used as words when there is no `anchor` for it. */
   area?: string;
+  /** Where `area` is, when it has been looked up: the search is then held to a box around it instead of leaning on the words. */
+  anchor?: Anchor | null;
   openNow?: boolean;
   /** Fewer results than a full page, for a lookup of one named place. */
   limit?: number;
@@ -220,12 +251,13 @@ export interface PlaceSearch {
 /** Food and drink places matching the search, in Google's order. */
 export async function searchPlaces(search: PlaceSearch): Promise<Place[]> {
   const area = search.area?.trim();
+  const anchor = search.anchor ?? null;
   const raw = await searchText(
     {
-      textQuery: area ? `${withoutNearMe(search.query)} near ${area}` : withoutNearMe(search.query),
+      textQuery: area && !anchor ? `${withoutNearMe(search.query)} near ${area}` : withoutNearMe(search.query),
       pageSize: search.limit ?? PAGE_SIZE,
       ...(search.openNow ? { openNow: true } : {}),
-      ...(!area && search.near ? { locationRestriction: boxAround(search.near) } : {}),
+      ...(anchor ? { locationRestriction: boxAround(anchor.point, anchor.wide ? AROUND_CITY_MILES : AROUND_SPOT_MILES) } : !area && search.near ? { locationRestriction: boxAround(search.near) } : {}),
     },
     ["id", "displayName", "shortFormattedAddress", "formattedAddress", "primaryTypeDisplayName", "editorialSummary", "location", "currentOpeningHours", "rating", "userRatingCount", "priceLevel", "websiteUri", "googleMapsUri", "businessStatus"],
   );
