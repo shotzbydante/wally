@@ -11,9 +11,12 @@
  * billed (about ten cents). One checkout carries one dish, with its options
  * and a quantity, which is all this API accepts today.
  *
- * This is the first connector. It stays provider-specific in here; nothing
- * outside this file knows MealMe's shapes (rule 7).
+ * This is the first connector. `mealmeConnector` is the OrderingConnector
+ * the agent sees (through src/lib/server/ordering.ts); the functions below
+ * it are MealMe's own shapes and stay in this file (rule 7).
  */
+import type { MenuEntry, OrderingConnector, Quote, Venue } from "@wally/core";
+
 const BASE = () => process.env.MEALME_API_BASE?.trim().replace(/\/+$/, "") || "https://mealmeai.vercel.app";
 
 export const mealmeConfigured = () => Boolean(process.env.MEALME_API_KEY?.trim());
@@ -112,7 +115,16 @@ async function call<T>(path: string, body?: unknown): Promise<T> {
   return data as T;
 }
 
-const cents = (p: { amount?: number; amountCents?: number } | undefined) => p?.amountCents ?? p?.amount ?? 0;
+/**
+ * A price in cents. MealMe sends either amountCents or amount (also cents, as
+ * seen in its answers: 1549 for $15.49). No price at all means free, which is
+ * how options come; a price in neither form is unreadable, and null.
+ */
+const cents = (p: { amount?: number; amountCents?: number } | undefined): number | null => {
+  if (p === undefined) return 0;
+  const n = typeof p.amountCents === "number" ? p.amountCents : typeof p.amount === "number" ? p.amount : null;
+  return n !== null && Number.isInteger(n) && n >= 0 ? n : null;
+};
 
 /**
  * Restaurants that take orders through Square, near a ZIP code. MealMe's
@@ -157,25 +169,32 @@ export async function searchMenu(storeId: string, query: string, limit = 8): Pro
     };
   }
   const data = await call<{ items?: RawItem[] }>(`/api/catalog/search?${q}`);
-  return (data.items ?? [])
-    .filter((i) => i.providerItemId && i.title && i.raw?.unitToken && i.raw.menuItemVariationId)
-    .map((i) => ({
+  const items: MenuItem[] = [];
+  for (const i of data.items ?? []) {
+    if (!i.providerItemId || !i.title || !i.raw?.unitToken || !i.raw.menuItemVariationId) continue;
+    // An item whose price, or any option's price, can't be read is left out: a ticket must never show a guessed figure.
+    const price = cents(i.price);
+    const required = (i.raw.requiredModifierLists ?? []).map((l) => ({
+      id: l.id,
+      name: l.name,
+      min: l.minSelection ?? 1,
+      max: l.maxSelection ?? 1,
+      options: (l.options ?? []).map((o) => ({ id: o.id, name: o.name, cents: cents(o.price) })),
+    }));
+    if (price === null || required.some((l) => l.options.some((o) => o.cents === null))) continue;
+    items.push({
       id: i.providerItemId,
       name: i.title.trim(),
       description: (i.description ?? "").trim().slice(0, 300),
-      cents: cents(i.price),
-      unitToken: i.raw!.unitToken!,
-      variationId: i.raw!.menuItemVariationId!,
-      variationName: i.raw!.variations?.find((v) => v.id === i.raw!.menuItemVariationId)?.name ?? "",
-      required: (i.raw!.requiredModifierLists ?? []).map((l) => ({
-        id: l.id,
-        name: l.name,
-        min: l.minSelection ?? 1,
-        max: l.maxSelection ?? 1,
-        options: (l.options ?? []).map((o) => ({ id: o.id, name: o.name, cents: cents(o.price) })),
-      })),
+      cents: price,
+      unitToken: i.raw.unitToken,
+      variationId: i.raw.menuItemVariationId,
+      variationName: i.raw.variations?.find((v) => v.id === i.raw!.menuItemVariationId)?.name ?? "",
+      required: required.map((l) => ({ ...l, options: l.options.map((o) => ({ ...o, cents: o.cents! })) })),
       pickup: (i.fulfillment ?? []).includes("PICKUP"),
-    }));
+    });
+  }
+  return items;
 }
 
 /**
@@ -200,9 +219,11 @@ export async function checkout(store: Store, item: MenuItem, modifierIds: string
   const sq = out.square?.cart;
   const line = sq?.lines?.[0];
   if (!out.checkoutUrl || !sq || !line) throw new MealMeError(0, "no checkout");
-  const subtotal = sq.subtotal?.amountCents ?? 0;
-  const total = sq.total?.amountCents ?? subtotal;
+  // Every figure must be the restaurant's own and add up; a ticket is never shown with a guessed or missing total.
+  const subtotal = sq.subtotal?.amountCents;
+  const total = sq.total?.amountCents;
   const tax = (sq.summaryLines ?? []).filter((s) => s.type === "SALES_TAX").reduce((sum, s) => sum + (s.amount?.amountCents ?? 0), 0);
+  if (typeof subtotal !== "number" || typeof total !== "number" || subtotal <= 0 || total < subtotal + tax) throw new MealMeError(0, "bad totals");
   return {
     restaurant: store.name,
     address: store.address,
@@ -217,31 +238,81 @@ export async function checkout(store: Store, item: MenuItem, modifierIds: string
   };
 }
 
-/** Words in a name that don't tell one place from another. */
-const FILLER = new Set(["the", "and", "los", "angeles", "restaurant", "cafe", "kitchen", "bar", "grill", "inc", "llc"]);
-const words = (s: string) => s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9 ]/g, " ").split(/\s+/).filter((w) => w.length > 2 && !FILLER.has(w));
-
-/** Loose match between a name a person used and a store's listed name. */
-export function nameMatches(wanted: string, listed: string): boolean {
-  const a = words(wanted);
-  const b = words(listed);
-  return a.length > 0 && a.every((w) => b.some((x) => x.startsWith(w) || w.startsWith(x)));
-}
+/** How long a built cart is trusted before it must be built again (OR-5). */
+const QUOTE_MINUTES = 15;
 
 /**
- * Whether a place found elsewhere (name and street address) is one of these
- * stores. Names must match loosely both ways, and the street numbers must
- * agree when both are known, so two branches of a chain aren't confused.
+ * The item id the agent and the thread carry: MealMe's item id and the two
+ * Square tokens checkout needs, so a menu read in one turn can be ordered in a
+ * later one without reading it again. Opaque outside this file.
  */
-export function sameStore(place: { name: string; address: string }, store: Store): boolean {
-  const number = (s: string) => /^\s*(\d+)/.exec(s)?.[1];
-  const n1 = number(place.address);
-  const n2 = number(store.address);
-  if (n1 && n2 && n1 !== n2) return false;
-  return nameMatches(place.name, store.name) || nameMatches(store.name, place.name);
+const packItemId = (i: Pick<MenuItem, "id" | "unitToken" | "variationId">) => `${i.id}|${i.unitToken}|${i.variationId}`;
+function unpackItemId(packed: string): Pick<MenuItem, "id" | "unitToken" | "variationId"> | null {
+  const [id, unitToken, variationId] = packed.split("|");
+  return id && unitToken && variationId ? { id, unitToken, variationId } : null;
 }
 
-/** The ZIP in a saved address, if it has one. */
-export function zipOf(address: string | null | undefined): string | undefined {
-  return /\b(\d{5})(?:-\d{4})?\b(?!.*\b\d{5}\b)/.exec(address ?? "")?.[1];
+const venueOf = (store: Store): Venue => ({ id: store.id, name: store.name, address: store.address, ...(store.open !== undefined ? { open: store.open } : {}), ...(store.miles !== undefined ? { distanceMiles: store.miles } : {}) });
+
+/**
+ * MealMe as an OrderingConnector, for one diner (`customer` is the account
+ * id, which MealMe keeps carts by). It hands off: the quote is a cart on the
+ * restaurant's Square, and `place` only returns the checkout page.
+ */
+export function mealmeConnector(customer: string): OrderingConnector {
+  return {
+    id: "mealme",
+    kind: "aggregator",
+    async search({ text, zip, limit, radiusMiles }) {
+      // MealMe's store search has no text filter; the agent matches names itself. The words are kept for a connector that can use them.
+      void text;
+      const stores = await searchStores(zip, limit ?? 10, radiusMiles ?? 6);
+      return stores.map(venueOf);
+    },
+    async menu(venueId, query) {
+      const items = await searchMenu(venueId, query ?? "", 8);
+      return items.map(
+        (i): MenuEntry => ({
+          itemId: packItemId(i),
+          name: i.variationName && i.variationName !== "Regular" ? `${i.name} (${i.variationName})` : i.name,
+          description: i.description,
+          unitPrice: i.cents,
+          pickup: i.pickup,
+          choices: i.required.map((l) => ({ id: l.id, name: l.name, min: l.min, max: l.max, options: l.options.map((o) => ({ id: o.id, name: o.name, price: o.cents })) })),
+        }),
+      );
+    },
+    async quote(venue, items, tip) {
+      // One dish per checkout: MealMe's Square checkout takes a single item spec and ignores extra cart items.
+      const [first] = items;
+      const ids = first && unpackItemId(first.itemId);
+      if (!first || !ids) throw new MealMeError(0, "no item");
+      const store: Store = { id: venue.id, name: venue.name, address: venue.address ?? "" };
+      const item: MenuItem = { ...ids, name: first.name, description: "", cents: first.unitPrice, variationName: first.variant ?? "", required: [], pickup: true };
+      const ticket = await checkout(store, item, first.optionIds ?? [], first.quantity, customer);
+      return {
+        id: ticket.checkoutUrl,
+        connectorId: "mealme",
+        venue,
+        items: [{ itemId: first.itemId, name: ticket.item, variant: ticket.variation, quantity: ticket.quantity, unitPrice: first.unitPrice, modifiers: ticket.modifiers }],
+        subtotal: ticket.subtotal,
+        deliveryFee: 0,
+        serviceFee: 0,
+        tax: ticket.tax,
+        tip,
+        total: ticket.total,
+        expiresAt: new Date(Date.now() + QUOTE_MINUTES * 60_000).toISOString(),
+        handoffUrl: ticket.checkoutUrl,
+      } satisfies Quote;
+    },
+    async place(quote) {
+      return quote.handoffUrl ? { status: "handoff", url: quote.handoffUrl } : { status: "failed", reason: "no checkout page" };
+    },
+    async track(orderId) {
+      return { orderId, state: "problem", detail: "Paid on the restaurant's own checkout; not tracked here." };
+    },
+    async cancel() {
+      return { cancelled: false, detail: "Cancel with the restaurant." };
+    },
+  };
 }

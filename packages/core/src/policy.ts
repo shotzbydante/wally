@@ -59,3 +59,28 @@ export function canSubmit(ctx: SubmitContext): Decision {
     return deny("total_changed", "Total changed since approval; re-confirm.");
   return { allow: true };
 }
+
+/**
+ * A hand-off is different from a submit: the connector builds the cart and
+ * sends the diner to the venue's own checkout, where they see the itemized
+ * ticket and approve by paying (AP-1, OR-3). Nothing is charged by Wally, so
+ * no approval is needed here; what still applies is the kill switch, the
+ * health of the checkout being handed to (fail closed), and a fresh quote.
+ */
+export interface HandoffContext {
+  quote: Quote;
+  /** Kill switch (AP-5). */
+  paused: boolean;
+  /** The venue's checkout is answering (AP-7): fail closed. */
+  checkoutHealthy: boolean;
+  now: Date;
+}
+
+export function canHandOff(ctx: HandoffContext): Decision {
+  if (ctx.paused) return deny("paused", "Wally is paused.");
+  if (!ctx.checkoutHealthy) return deny("payments_degraded", "Checkout is degraded; not handing off.");
+  if (!ctx.quote.handoffUrl) return deny("payments_degraded", "No checkout page to hand off to.");
+  if (ctx.now.getTime() >= new Date(ctx.quote.expiresAt).getTime())
+    return deny("quote_expired", "Quote expired; re-quote and re-confirm.");
+  return { allow: true };
+}

@@ -1,7 +1,8 @@
 import Anthropic from "@anthropic-ai/sdk";
-import { CURRENT_LOCATION, asPlainText, cityOf, hostOf, isOwnSite, withSources, type ChatMessage, type Choice, type Source } from "@/lib/chat";
+import { CURRENT_LOCATION, asPlainText, cityOf, hostOf, isOwnSite, withSources, type ChatMessage, type Choice, type MenuSnapshot, type Source, type TicketInfo } from "@/lib/chat";
 import type { Channel } from "./conversation";
-import { MealMeError, checkout, mealmeConfigured, nameMatches, sameStore, searchMenu, searchStores, zipOf, type MenuItem, type Store } from "./mealme";
+import type { CartItem, MenuEntry, Venue } from "@wally/core";
+import { mayHandOff, nameMatches, orderingConfigured, orderingConnector, sameStore, zipOf } from "./ordering";
 import { PlacesError, findAnchor, milesBetween, placesConfigured, searchPlaces, zipAt, type Anchor, type Place, type Point, type TravelMode } from "./places";
 
 /**
@@ -77,6 +78,8 @@ const ORDERING = `# Ordering (restaurants that take orders through Square)
 - When someone wants to order something, call find_menu with the restaurant's name and the dish in their words. It tells you whether the place takes orders this way, and lists matching menu items with their prices and the choices each one needs (a base, a protein, a size).
 - If the place doesn't take orders this way, say so in one line and point them to its own site or the delivery apps on its card. Never pretend to order anywhere else.
 - Before building the order, you must know every required choice. Ask for the ones the person hasn't given, in one message, offering the options by name. Don't guess a protein or a base.
+- A menu you read in one of your last few answers stays ready: it appears in your own earlier turn as a "Menu at …" line with its item and option ids. When the person answers your question, call order_ticket with those ids straight away; don't call find_menu again for the same place and dish (each read costs money) unless order_ticket says the menu is gone.
+- Only pickup items are listed. If find_menu says the dish is for dining in only, say so and offer another.
 - Then call order_ticket once, with the item, the chosen option ids and the quantity. It builds the cart and shows the person a ticket card with the exact subtotal, tax and total from the restaurant, and a Pay button. Say one short line with it, in your voice, and that they pay on the restaurant's page.
 - One dish per order for now (any quantity). For a second dish, build a second order.
 - Prices, tax and totals come only from find_menu and order_ticket. Never quote a price from memory. The ticket's figures are exact; don't restate them in your line.
@@ -223,6 +226,8 @@ const STORES_PER_TURN = 80;
 
 /** How many orderable stores named for the search are added to a place search that missed them, each a Places lookup. */
 const MAX_NAMED_ORDERABLE = 3;
+/** How many answers a menu stays ready to order from after it was read, so a question in between doesn't mean reading (and paying for) it again. */
+export const MENU_TURNS = 3;
 
 /** Words in a search that say nothing about the food, so a store name is never matched on them. */
 const FILLER = new Set(["near", "nearby", "spot", "spots", "place", "places", "restaurant", "restaurants", "food", "best", "good", "open", "late", "night", "delivery", "pickup", "takeout", "cheap", "around", "here", "order", "from", "with", "wally"]);
@@ -268,35 +273,61 @@ const ORDER_TICKET_TOOL: Anthropic.Tool = {
   },
 };
 
-/** The menu items find_menu returned this turn, by the short ids Claude quotes back. */
-export interface MenuFound {
-  store: Store;
-  items: Map<string, MenuItem>;
-  /** Option ids by short id, each with the item and list it belongs to. */
-  options: Map<string, { itemId: string; listId: string; optionId: string }>;
+/**
+ * The menu find_menu returned, by the short ids Claude quotes back. It is
+ * plain data (see MenuSnapshot in src/lib/chat.ts) because it rides on the
+ * assistant's message when a turn ends with an order still being decided,
+ * so the next turn can ticket an item without reading the menu again.
+ */
+export type MenuFound = MenuSnapshot;
+
+/** Builds the menu Claude is shown from what the connector returned: dine-in-only items are left out. */
+export function menuFound(venue: Venue, entries: MenuEntry[]): MenuFound {
+  const found: MenuFound = { venue, items: {}, options: {}, age: 0 };
+  entries
+    .filter((e) => e.pickup)
+    .forEach((entry, i) => {
+      const id = `m${i + 1}`;
+      found.items[id] = entry;
+      entry.choices.forEach((group) => group.options.forEach((opt) => (found.options[`o${Object.keys(found.options).length + 1}`] = { itemId: id, groupId: group.id, optionId: opt.id })));
+    });
+  return found;
 }
 
 /** What Claude is told after find_menu: the place, and each item with its price and required choices. */
 export function describeMenu(found: MenuFound): string {
-  const items = [...found.items].map(([id, item]) => ({
+  const items = Object.entries(found.items).map(([id, item]) => ({
     id,
     name: item.name,
-    price: `$${(item.cents / 100).toFixed(2)}`,
+    price: `$${(item.unitPrice / 100).toFixed(2)}`,
     ...(item.description ? { about: item.description.slice(0, 160) } : {}),
-    required_choices: item.required.map((list) => ({
-      name: list.name,
-      pick: list.min === list.max ? list.min : `${list.min} to ${list.max}`,
-      options: [...found.options].filter(([, o]) => o.itemId === id && o.listId === list.id).map(([oid, o]) => {
-        const opt = list.options.find((x) => x.id === o.optionId)!;
-        return `${oid}: ${opt.name}${opt.cents ? ` (+$${(opt.cents / 100).toFixed(2)})` : ""}`;
-      }),
+    required_choices: item.choices.map((group) => ({
+      name: group.name,
+      pick: group.min === group.max ? group.min : `${group.min} to ${group.max}`,
+      options: Object.entries(found.options)
+        .filter(([, o]) => o.itemId === id && o.groupId === group.id)
+        .map(([oid, o]) => {
+          const opt = group.options.find((x) => x.id === o.optionId)!;
+          return `${oid}: ${opt.name}${opt.price ? ` (+$${(opt.price / 100).toFixed(2)})` : ""}`;
+        }),
     })),
   }));
-  return JSON.stringify({ restaurant: found.store.name, address: found.store.address, open: found.store.open, items });
+  return JSON.stringify({ restaurant: found.venue.name, address: found.venue.address, open: found.venue.open, items });
 }
 
-/** Loose match between the name the person used and a store's listed name. */
-export const storeMatches = (wanted: string, store: Store) => nameMatches(wanted, store.name);
+/** The menu the last few answers were ordering from, if one is still being decided on. */
+export function savedMenu(thread: ChatMessage[]): MenuFound | null {
+  for (let i = thread.length - 1; i >= 0; i--) {
+    const m = thread[i]!;
+    if (m.role !== "assistant") continue;
+    const carried = m.choices?.find((c) => c.menu)?.menu;
+    return carried && carried.age < MENU_TURNS ? carried : null;
+  }
+  return null;
+}
+
+/** Loose match between the name the person used and a venue's listed name. */
+export const storeMatches = (wanted: string, store: Pick<Venue, "name">) => nameMatches(wanted, store.name);
 
 function searchTool(guest: Guest): Anthropic.WebSearchTool20250305 {
   return {
@@ -535,6 +566,9 @@ export interface Listener {
   onSearch?: () => void;
 }
 
+/** An error the ordering connector raised (its source not answering, refusing, or sending figures that don't add up): told to Claude plainly, never thrown. */
+const isConnectorError = (error: unknown) => error instanceof Error && !(error instanceof AgentError) && !(error instanceof PlacesError);
+
 export class AgentError extends Error {
   constructor(public reason: "not_configured" | "busy" | "failed") {
     super(reason);
@@ -553,10 +587,14 @@ export async function reply(thread: ChatMessage[], guest: Guest, channel: Channe
   const blocks: Anthropic.ContentBlock[] = [];
   const found = new Map<string, FoundPlace>();
   const shown = shownPlaces(thread);
-  const canOrder = mealmeConfigured() && Boolean(guest.id);
-  let menu: MenuFound | null = null;
-  /** The stores that take orders near the person, looked up once per turn and only when a place search needs them. */
-  let orderable: Promise<Store[]> | null = null;
+  const ordering = guest.id ? orderingConnector(guest.id) : null;
+  const canOrder = orderingConfigured() && Boolean(ordering);
+  /** The menu being ordered from: read this turn, or carried over from the last few answers. */
+  let menu: MenuFound | null = savedMenu(thread);
+  let menuUsed = false;
+  let ticketed = false;
+  /** The venues that take orders near the person, looked up once per turn and only when a search needs them. */
+  let orderable: Promise<Venue[]> | null = null;
   /** The ZIP ordering works from: the saved address's, else the one under a shared location, else the account's, else one Claude was told. */
   let zipFound: Promise<string | undefined> | null = null;
   const orderingZip = (told?: unknown) => {
@@ -569,10 +607,10 @@ export async function reply(thread: ChatMessage[], guest: Guest, channel: Channe
     return zipFound.then((z) => z ?? (/^\d{5}$/.test(clip(told, 5)) ? clip(told, 5) : undefined));
   };
   const orderableStores = async (told?: unknown) => {
-    if (!canOrder) return [] as Store[];
+    if (!ordering) return [] as Venue[];
     const zip = await orderingZip(told);
-    if (!zip) return [] as Store[];
-    orderable ??= searchStores(zip, STORES_PER_TURN, 8).catch(() => [] as Store[]);
+    if (!zip) return [] as Venue[];
+    orderable ??= ordering.search({ text: "", zip, limit: STORES_PER_TURN, radiusMiles: 8 }).catch(() => [] as Venue[]);
     return orderable;
   };
   let placeSearches = 0;
@@ -591,20 +629,20 @@ export async function reply(thread: ChatMessage[], guest: Guest, channel: Channe
    * Google Places by name and address so its card carries the same site, rating
    * and Maps link as any other. One not found there still gets a plain card.
    */
-  const orderablePlaces = async (stores: Store[], max = MAX_ORDERABLE): Promise<string[]> => {
-    const picked = [...stores].sort((a, b) => Number(b.open ?? true) - Number(a.open ?? true) || (a.miles ?? Infinity) - (b.miles ?? Infinity)).slice(0, max);
+  const orderablePlaces = async (stores: Venue[], max = MAX_ORDERABLE): Promise<string[]> => {
+    const picked = [...stores].sort((a, b) => Number(b.open ?? true) - Number(a.open ?? true) || (a.distanceMiles ?? Infinity) - (b.distanceMiles ?? Infinity)).slice(0, max);
     const matches = await Promise.all(
       picked.map(async (store) => {
         if (!placesConfigured()) return null;
-        const places = await searchPlaces({ query: `${store.name} ${store.address}`.trim(), near: guest.near, limit: 3, travel: guest.near ? { from: guest.near, mode: "DRIVE" } : null }).catch(() => [] as Place[]);
+        const places = await searchPlaces({ query: `${store.name} ${store.address ?? ""}`.trim(), near: guest.near, limit: 3, travel: guest.near ? { from: guest.near, mode: "DRIVE" } : null }).catch(() => [] as Place[]);
         return places.find((p) => sameStore(p, store)) ?? null;
       }),
     );
     return picked.map((store, i) => {
       const place: Place = matches[i] ?? {
-        id: `mealme:${store.id}`,
+        id: `order:${store.id}`,
         name: store.name,
-        address: store.address,
+        address: store.address ?? "",
         kind: "",
         summary: null,
         point: null,
@@ -614,14 +652,14 @@ export async function reply(thread: ChatMessage[], guest: Guest, channel: Channe
         ratings: null,
         price: null,
         website: null,
-        maps: `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${store.name} ${store.address}`.trim())}`,
+        maps: `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${store.name} ${store.address ?? ""}`.trim())}`,
         takeout: true,
         delivery: null,
         dineIn: null,
         reservable: null,
         timeZone: null,
       };
-      const miles = guest.near && place.point ? milesBetween(guest.near, place.point) : store.miles;
+      const miles = guest.near && place.point ? milesBetween(guest.near, place.point) : store.distanceMiles;
       found.set(place.id, { ...place, ...(miles !== undefined ? { miles } : {}), ...(shown.has(place.id) ? { shown: true } : {}), orders: true });
       return place.id;
     });
@@ -673,23 +711,25 @@ export async function reply(thread: ChatMessage[], guest: Guest, channel: Channe
     const zip = await orderingZip(args.zip);
     if (!restaurant || !dish) return { content: "Give the restaurant and the dish.", is_error: true };
     if (!zip) return { content: "You need a 5-digit ZIP to find restaurants that take orders. Ask the person for theirs in one short line.", is_error: true };
+    if (!ordering) return { content: "Ordering isn't switched on.", is_error: true };
     try {
-      const stores = await searchStores(zip, STORES_PER_TURN, 8);
+      // The same store list a place search fetched this turn, so it isn't billed twice.
+      const stores = await orderableStores(args.zip);
       const store = stores.find((s) => storeMatches(restaurant, s));
       if (!store) {
         const names = stores.slice(0, 6).map((s) => s.name);
         return { content: JSON.stringify({ takes_orders: false, note: "This restaurant doesn't take orders through Wally yet. Point the person to its own site or the delivery apps on its card.", nearby_that_do: names }) };
       }
-      const items = await searchMenu(store.id, dish, 8);
-      menu = { store, items: new Map(), options: new Map() };
-      items.forEach((item, i) => {
-        const id = `m${i + 1}`;
-        menu!.items.set(id, item);
-        item.required.forEach((list) => list.options.forEach((opt) => menu!.options.set(`o${menu!.options.size + 1}`, { itemId: id, listId: list.id, optionId: opt.id })));
-      });
-      return { content: items.length ? describeMenu(menu) : JSON.stringify({ restaurant: store.name, takes_orders: true, items: [], note: "Nothing on the menu matched. Try other words for the dish." }) };
+      const entries = await ordering.menu(store.id, dish);
+      menu = menuFound(store, entries);
+      menuUsed = true;
+      const dineInOnly = entries.length - Object.keys(menu.items).length;
+      if (!Object.keys(menu.items).length) {
+        return { content: JSON.stringify({ restaurant: store.name, takes_orders: true, items: [], note: dineInOnly ? "The matching items are for dining in only, not pickup. Say so, and offer another dish." : "Nothing on the menu matched. Try other words for the dish." }) };
+      }
+      return { content: describeMenu(menu) };
     } catch (error) {
-      if (!(error instanceof MealMeError)) throw error;
+      if (!isConnectorError(error)) throw error;
       return { content: "The ordering service isn't responding. Tell the person plainly that you can't build an order just now.", is_error: true };
     }
   };
@@ -697,16 +737,39 @@ export async function reply(thread: ChatMessage[], guest: Guest, channel: Channe
   /** Runs order_ticket: checks the choices, builds the cart, returns the ticket card. */
   const orderTicket = async (input: unknown): Promise<{ card?: Choice; error?: string }> => {
     const args = (input ?? {}) as { item?: unknown; options?: unknown; quantity?: unknown; line?: unknown };
-    const item = menu?.items.get(clip(args.item, 8));
-    if (!menu || !item) return { error: "Call find_menu first and use an item id from it." };
-    const picked = (Array.isArray(args.options) ? args.options : []).map((o) => menu!.options.get(clip(o, 8))).filter((o): o is NonNullable<typeof o> => Boolean(o) && o!.itemId === clip(args.item, 8));
-    for (const list of item.required) {
-      const n = picked.filter((o) => o.listId === list.id).length;
-      if (n < list.min || n > list.max) return { error: `"${list.name}" needs ${list.min === list.max ? list.min : `${list.min} to ${list.max}`} choice(s); ${n} given. Ask the person, then call order_ticket again.` };
+    const itemId = clip(args.item, 8);
+    const item = menu?.items[itemId];
+    if (!menu || !item || !ordering) return { error: "Call find_menu first and use an item id from it." };
+    menuUsed = true;
+    const picked = (Array.isArray(args.options) ? args.options : []).map((o) => menu!.options[clip(o, 8)]).filter((o): o is NonNullable<typeof o> => Boolean(o) && o!.itemId === itemId);
+    for (const group of item.choices) {
+      const n = picked.filter((o) => o.groupId === group.id).length;
+      if (n < group.min || n > group.max) return { error: `"${group.name}" needs ${group.min === group.max ? group.min : `${group.min} to ${group.max}`} choice(s); ${n} given. Ask the person, then call order_ticket again.` };
     }
     const quantity = Math.min(10, Math.max(1, Math.floor(Number(args.quantity)) || 1));
+    const names = picked.map((o) => item.choices.find((g) => g.id === o.groupId)?.options.find((x) => x.id === o.optionId)?.name ?? "").filter(Boolean);
+    const cart: CartItem = { itemId: item.itemId, name: item.name, quantity, unitPrice: item.unitPrice, modifiers: names, optionIds: picked.map((o) => o.optionId) };
     try {
-      const ticket = await checkout(menu.store, item, picked.map((o) => o.optionId), quantity, guest.id!);
+      const quote = await ordering.quote(menu.venue, [cart], 0);
+      // Policy is code (rule 1): the kill switch and the quote's age are checked here, never by the model.
+      const decision = mayHandOff(quote);
+      if (!decision.allow) return { error: `Not handed off: ${decision.message} Tell the person plainly that the order can't go through right now.` };
+      const placed = await ordering.place(quote, quote.id);
+      if (placed.status !== "handoff") return { error: "The restaurant's checkout didn't give a page to pay on. Tell the person plainly that the order couldn't be built just now." };
+      const line = quote.items[0]!;
+      const ticket: TicketInfo = {
+        restaurant: quote.venue.name,
+        address: quote.venue.address ?? "",
+        item: line.name,
+        variation: line.variant ?? "",
+        modifiers: line.modifiers ?? [],
+        quantity: line.quantity,
+        subtotal: quote.subtotal,
+        tax: quote.tax,
+        total: quote.total,
+        checkoutUrl: placed.url,
+      };
+      ticketed = true;
       return {
         card: {
           emoji: "🧾",
@@ -717,7 +780,7 @@ export async function reply(thread: ChatMessage[], guest: Guest, channel: Channe
         },
       };
     } catch (error) {
-      if (!(error instanceof MealMeError)) throw error;
+      if (!isConnectorError(error)) throw error;
       return { error: "The restaurant's checkout didn't respond. Tell the person plainly that the order couldn't be built just now." };
     }
   };
@@ -830,6 +893,11 @@ export async function reply(thread: ChatMessage[], guest: Guest, channel: Channe
     choices ??= readChoices(choicesInput, hosts);
     const said = text.trim();
     if (!said && !choices) throw new AgentError("failed");
+    // An order still being decided keeps its menu with the answer, so the next turn can ticket it without reading the menu again.
+    if (menu && !ticketed) {
+      const carried: MenuSnapshot = { ...menu, age: menuUsed ? 0 : menu.age + 1 };
+      if (carried.age < MENU_TURNS) choices = [...(choices ?? []), { emoji: "", title: `Menu at ${menu.venue.name}`, detail: "", reply: "", menu: carried }];
+    }
     // Show what he cited. If he searched but cited nothing, show where the cards' links came from.
     const linked = web.found.filter((s) => choices?.some((c) => c.url && hostOf(c.url) === hostOf(s.url)));
     const sources = (web.cited.length ? web.cited : linked).slice(0, MAX_SOURCES);

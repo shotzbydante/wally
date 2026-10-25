@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type CS
 import { LocationBar } from "@/components/LocationBar";
 import { Wally } from "@/components/Wally";
 import { WallyFace, type WallyLook } from "@/components/WallyFace";
-import { MAX_MESSAGE_CHARS, OPEN_BADGE_MINUTES, deliveryLinks, dollars, hostOf, isOwnSite, splitSources, type ChatEvent, type ChatMessage, type Choice, type TicketInfo } from "@/lib/chat";
+import { MAX_MESSAGE_CHARS, OPEN_BADGE_MINUTES, deliveryLinks, dollars, hostOf, isOwnSite, splitSources, visibleChoices, type ChatEvent, type ChatMessage, type Choice, type TicketInfo } from "@/lib/chat";
 
 /** What Wally is doing, which drives how he moves and what his bubble says. */
 type Mood = "idle" | "thinking" | "speaking" | "sorry";
@@ -636,7 +636,9 @@ function WallyTurn({
     () => at !== undefined && Date.now() - Date.parse(at) < OPEN_BADGE_MINUTES * 60_000,
     () => false,
   );
-  const places = choices?.some((c) => c.place) ?? false;
+  // A carried menu rides on the message but is never a card.
+  const shown = choices ? visibleChoices(choices) : null;
+  const places = shown?.some((c) => c.place) ?? false;
   return (
     <div>
       {said && (
@@ -647,10 +649,10 @@ function WallyTurn({
           {byText && <ByText />}
         </p>
       )}
-      {choices?.some((c) => c.ticket) && choices.map((c, i) => c.ticket && <Ticket key={i} ticket={c.ticket} live={live} />)}
-      {choices && !choices.some((c) => c.ticket) && (
+      {shown?.some((c) => c.ticket) && shown.map((c, i) => c.ticket && <Ticket key={i} ticket={c.ticket} live={live} />)}
+      {shown && shown.length > 0 && !shown.some((c) => c.ticket) && (
         <ul className={`mt-2 grid gap-1.5 ${places ? "" : "sm:grid-cols-2"}`}>
-          {choices.map((c, i) => (
+          {shown.map((c, i) => (
             <li
               key={`${i}-${c.title}`}
               className={`card flex flex-col overflow-hidden rounded-2xl bg-pad ring-1 ring-line transition-shadow ring-inset ${live ? "arrive hover:ring-2 hover:ring-green" : "opacity-70"}`}
