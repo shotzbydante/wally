@@ -41,7 +41,7 @@ describe("offering fast food next", () => {
   });
   it("is one line in a text, above the link to the site", () => {
     const texts = asTexts({ content: "Here you go.", choices: [card("Tacos El Gordo")] }, "https://wallywaiter.com");
-    expect(texts[1]).toContain(`\n\n${FAST_FOOD_LINE}\nVisit Wally for more options:`);
+    expect(texts[1]).toContain(`\n\nWant to see places that aren't open right now too? Just say so.\n${FAST_FOOD_LINE}\nVisit Wally for more options:`);
     expect(asTexts({ content: "Here you go.", choices: [card("McDonald's", true)] }, "https://wallywaiter.com")[1]).not.toContain(FAST_FOOD_LINE);
   });
 });
