@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type CS
 import { LocationBar } from "@/components/LocationBar";
 import { Wally } from "@/components/Wally";
 import { WallyFace, type WallyLook } from "@/components/WallyFace";
-import { CLOSED_ASK, MAX_MESSAGE_CHARS, OPEN_BADGE_MINUTES, asideOf, deliveryLinks, dollars, fastFoodAsk, hostOf, howFarParts, isOwnSite, offersFastFood, splitSources, visibleChoices, type ChatEvent, type ChatMessage, type Choice, type TicketInfo } from "@/lib/chat";
+import { CLOSED_ASK, MAX_MESSAGE_CHARS, OPEN_BADGE_MINUTES, asideOf, deliveryLinks, dollars, fastFoodAsk, hostOf, howFarParts, isOwnSite, offersClosed, offersFastFood, splitSources, visibleChoices, type ChatEvent, type ChatMessage, type Choice, type TicketInfo } from "@/lib/chat";
 import { SiteIcon } from "@/components/SiteIcon";
 
 /** What Wally is doing, which drives how he moves and what his bubble says. */
@@ -728,9 +728,9 @@ function WallyTurn({
           </p>
           {live && (onMore || onFastFood || onClosed) && (
             <span className="flex flex-wrap items-center justify-end gap-1.5">
-              {onClosed && asideOf(choices)?.closed && (
+              {onClosed && offersClosed(choices) && (
                 <button type="button" onClick={onClosed} className="press inline-flex h-7 items-center gap-1 rounded-full bg-pad px-3 text-[0.8rem] font-semibold text-ink-soft ring-1 ring-line ring-inset hover:ring-ink">
-                  <span aria-hidden="true">🌙</span> {asideOf(choices)!.closed} closed right now
+                  <span aria-hidden="true">🌙</span> {asideOf(choices)?.closed ? `${asideOf(choices)!.closed} closed right now` : "Not open right now"}
                 </button>
               )}
               {onFastFood && offersFastFood(choices) && (

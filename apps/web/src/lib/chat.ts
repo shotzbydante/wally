@@ -33,8 +33,14 @@ export const asideOf = (choices: Choice[] | null | undefined): Aside | undefined
 
 /** What the person says to see the places that were closed. */
 export const CLOSED_ASK = "Show me the places that aren't open right now too";
-/** The line under place cards that offers the closed ones. */
-export const closedLine = (n: number) => `${n === 1 ? "One more that fits is" : `${n} more that fit are`} closed right now; say so if you want ${n === 1 ? "it" : "them"} too.`;
+/** The line under place cards that offers the closed ones: with the count when the search found some, as a plain question otherwise. */
+export const closedLine = (n?: number) => (n ? `${n === 1 ? "One more that fits is" : `${n} more that fit are`} closed right now; say so if you want ${n === 1 ? "it" : "them"} too.` : "Want to see places that aren't open right now too? Just say so.");
+
+/** Whether an answer's place cards are the open-now kind, so offering the closed ones next makes sense. Not under an answer that is itself the closed ones. */
+export function offersClosed(choices: Choice[] | null | undefined): boolean {
+  const places = visibleChoices(choices).filter((c) => c.place);
+  return places.length > 0 && places.some((c) => c.place!.open !== false);
+}
 
 /** The menu find_menu returned, by the short ids Claude uses, as plain data. */
 export interface MenuSnapshot {
@@ -239,8 +245,7 @@ export function asTexts(message: Pick<ChatMessage, "content" | "choices">, origi
     return [`${i + 1}. ${c.emoji ? `${c.emoji} ` : ""}${c.title}`, facts.join(" · "), c.detail, ...links].filter(Boolean).join("\n");
   });
   // Every set of options closes with the way into the same conversation on the website.
-  const closed = asideOf(message.choices)?.closed;
-  const more = `${closed ? `${closedLine(closed)}\n` : ""}${offersFastFood(message.choices) ? `${FAST_FOOD_LINE}\n` : ""}Visit Wally for more options: ${tidyLink(`${origin}/ask`)}${sayInSync ? "\nIt's this same conversation, always in sync with our texts." : ""}`;
+  const more = `${offersClosed(message.choices) ? `${closedLine(asideOf(message.choices)?.closed)}\n` : ""}${offersFastFood(message.choices) ? `${FAST_FOOD_LINE}\n` : ""}Visit Wally for more options: ${tidyLink(`${origin}/ask`)}${sayInSync ? "\nIt's this same conversation, always in sync with our texts." : ""}`;
   return [message.content.trim(), cards.length ? `${cards.join("\n\n")}\n\n${more}` : ""].filter(Boolean);
 }
 

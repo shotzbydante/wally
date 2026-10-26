@@ -157,7 +157,7 @@ describe("asTexts", () => {
   it("sends his words and the cards as separate texts, a small card per place", () => {
     expect(asTexts({ content: "Insomnia is my pick.", choices: [cookies, closed] }, "https://wallywaiter.com")).toEqual([
       "Insomnia is my pick.",
-      "1. 🍪 Insomnia Cookies\nOpen now · 2.8 mi · ★ 4.5 · $\nOpen late, warm cookies\ninsomniacookies.com\nMap: wallywaiter.com/m/1\n\n2. 🥛 DeLuscious\nClosed · 1.1 mi\nDoorDash: wallywaiter.com/go/doordash/deluscious\nUber Eats: wallywaiter.com/go/ubereats/deluscious\nMap: wallywaiter.com/m/2\n\nFast food or a drive-thru? Just say so.\nVisit Wally for more options: wallywaiter.com/ask",
+      "1. 🍪 Insomnia Cookies\nOpen now · 2.8 mi · ★ 4.5 · $\nOpen late, warm cookies\ninsomniacookies.com\nMap: wallywaiter.com/m/1\n\n2. 🥛 DeLuscious\nClosed · 1.1 mi\nDoorDash: wallywaiter.com/go/doordash/deluscious\nUber Eats: wallywaiter.com/go/ubereats/deluscious\nMap: wallywaiter.com/m/2\n\nWant to see places that aren't open right now too? Just say so.\nFast food or a drive-thru? Just say so.\nVisit Wally for more options: wallywaiter.com/ask",
     ]);
     expect(asTexts({ content: "Just words.", choices: null }, "https://wallywaiter.com")).toEqual(["Just words."]);
     // Around a spot the person named, the distance says where it is from.
@@ -175,6 +175,9 @@ describe("asTexts", () => {
     expect(offered[1]).toContain("\n\n2 more that fit are closed right now; say so if you want them too.\nFast food or a drive-thru? Just say so.\nVisit Wally");
     expect(offered[1]).not.toContain("2. ");
     expect(asPlainText({ content: "Here.", choices: [cookies, aside] })).not.toContain("closed right now");
+    // Under an answer that is itself the closed ones, nothing further is offered.
+    const closedCard = { ...cookies, place: { ...cookies.place, open: false } };
+    expect(asTexts({ content: "Here.", choices: [closedCard] }, "https://wallywaiter.com")[1]).not.toMatch(/open right now/);
     expect(asTexts({ content: "Two ideas.", choices: [ramen, tacos] }, "https://wallywaiter.com")).toEqual(["Two ideas.", "1. 🍜 Ramen\nRich and warm\n\n2. 🌮 Tacos\n\nVisit Wally for more options: wallywaiter.com/ask"]);
     expect(asTexts({ content: "", choices: [ramen, tacos] }, "https://wallywaiter.com", true)[0]).toMatch(/wallywaiter\.com\/ask\nIt's this same conversation, always in sync with our texts\.$/);
   });
