@@ -205,7 +205,7 @@ describe("place cards", () => {
     // Closer by foot comes first even when the straight line says otherwise.
     const cards = placeChoices(pick("p3", "p2", "p1"), routed)!;
     expect(cards.map((c) => c.title)).toEqual(["Carney's", "Mel's", "SMSHD"]);
-    expect(cards[0]!.place).toMatchObject({ miles: 0.3, from: "Pantages Theatre", travel: { mode: "WALK", minutes: 6 } });
+    expect(cards[0]!.place).toMatchObject({ miles: 0.3, from: "Pantages Theatre", travel: { mode: "WALK", minutes: 6, miles: 0.4 } });
     expect(placesIntro({}, cards)).toBe("I'd start with Carney's: a 6 min walk from Pantages Theatre, open now, rated 4.5. A few more worth a look are below.");
   });
   it("names the chain a listing belongs to, its drive-thru habit, and puts its icon on the card", () => {

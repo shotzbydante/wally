@@ -157,18 +157,24 @@ describe("asTexts", () => {
   it("sends his words and the cards as separate texts, a small card per place", () => {
     expect(asTexts({ content: "Insomnia is my pick.", choices: [cookies, closed] }, "https://wallywaiter.com")).toEqual([
       "Insomnia is my pick.",
-      "1. 🍪 Insomnia Cookies\nOpen now · 2.8 mi · ★ 4.5 · $\nOpen late, warm cookies\ninsomniacookies.com\n\n2. 🥛 DeLuscious\nClosed · 1.1 mi\nDoorDash: wallywaiter.com/go/doordash/deluscious\nUber Eats: wallywaiter.com/go/ubereats/deluscious\n\nFast food or a drive-thru? Just say so.\nVisit Wally for more options: wallywaiter.com/ask",
+      "1. 🍪 Insomnia Cookies\nOpen now · 2.8 mi · ★ 4.5 · $\nOpen late, warm cookies\ninsomniacookies.com\nMap: https://maps.google.com/?cid=1\n\n2. 🥛 DeLuscious\nClosed · 1.1 mi\nDoorDash: wallywaiter.com/go/doordash/deluscious\nUber Eats: wallywaiter.com/go/ubereats/deluscious\nMap: https://maps.google.com/?cid=2\n\nFast food or a drive-thru? Just say so.\nVisit Wally for more options: wallywaiter.com/ask",
     ]);
     expect(asTexts({ content: "Just words.", choices: null }, "https://wallywaiter.com")).toEqual(["Just words."]);
     // Around a spot the person named, the distance says where it is from.
     const byTheater = { ...cookies, place: { ...cookies.place, miles: 0.3, from: "Pantages Theatre" } };
     expect(asTexts({ content: "Close by.", choices: [byTheater] }, "https://wallywaiter.com")[1]).toContain("Open now · 0.3 mi from Pantages Theatre · ★ 4.5 · $");
     expect(asPlainText({ content: "Close by.", choices: [byTheater] })).toContain("(0.3 mi from Pantages Theatre, open)");
-    // With a travel time, that is what is said, not the straight-line miles.
-    const walk = { ...byTheater, place: { ...byTheater.place, travel: { mode: "WALK" as const, minutes: 6 } } };
-    expect(asTexts({ content: "Close by.", choices: [walk] }, "https://wallywaiter.com")[1]).toContain("Open now · 6 min walk from Pantages Theatre · ★ 4.5 · $");
+    // With a travel time, that is what is said, with the road miles beside it.
+    const walk = { ...byTheater, place: { ...byTheater.place, travel: { mode: "WALK" as const, minutes: 6, miles: 0.4 } } };
+    expect(asTexts({ content: "Close by.", choices: [walk] }, "https://wallywaiter.com")[1]).toContain("Open now · 6 min walk (0.4 mi) from Pantages Theatre · ★ 4.5 · $");
     const drive = { ...cookies, place: { ...cookies.place, travel: { mode: "DRIVE" as const, minutes: 12 } } };
-    expect(asPlainText({ content: "x", choices: [drive] })).toContain("(12 min drive, open)");
+    expect(asPlainText({ content: "x", choices: [drive] })).toContain("(12 min drive (2.8 mi), open)");
+    // Closed places that fit are offered under the cards, and the offer is never a card.
+    const aside = { emoji: "", title: "", detail: "", reply: "", aside: { closed: 2 } };
+    const offered = asTexts({ content: "Here.", choices: [cookies, aside] }, "https://wallywaiter.com");
+    expect(offered[1]).toContain("\n\n2 more that fit are closed right now; say so if you want them too.\nFast food or a drive-thru? Just say so.\nVisit Wally");
+    expect(offered[1]).not.toContain("2. ");
+    expect(asPlainText({ content: "Here.", choices: [cookies, aside] })).not.toContain("closed right now");
     expect(asTexts({ content: "Two ideas.", choices: [ramen, tacos] }, "https://wallywaiter.com")).toEqual(["Two ideas.", "1. 🍜 Ramen\nRich and warm\n\n2. 🌮 Tacos\n\nVisit Wally for more options: wallywaiter.com/ask"]);
     expect(asTexts({ content: "", choices: [ramen, tacos] }, "https://wallywaiter.com", true)[0]).toMatch(/wallywaiter\.com\/ask\nIt's this same conversation, always in sync with our texts\.$/);
   });

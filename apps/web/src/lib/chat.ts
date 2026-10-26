@@ -19,7 +19,22 @@ export interface Choice {
    * Never shown; `visibleChoices` leaves it out. Claude reads it back as text.
    */
   menu?: MenuSnapshot;
+  /** Not a card: what a place answer left out, so the page and a text can offer it next. */
+  aside?: Aside;
 }
+
+export interface Aside {
+  /** Places that fit but were closed at the time, left off the cards. */
+  closed?: number;
+}
+
+/** What a place answer left out, if its cards are the latest. */
+export const asideOf = (choices: Choice[] | null | undefined): Aside | undefined => (choices ?? []).find((c) => c.aside)?.aside;
+
+/** What the person says to see the places that were closed. */
+export const CLOSED_ASK = "Show me the places that aren't open right now too";
+/** The line under place cards that offers the closed ones. */
+export const closedLine = (n: number) => `${n === 1 ? "One more that fits is" : `${n} more that fit are`} closed right now; say so if you want ${n === 1 ? "it" : "them"} too.`;
 
 /** The menu find_menu returned, by the short ids Claude uses, as plain data. */
 export interface MenuSnapshot {
@@ -32,7 +47,7 @@ export interface MenuSnapshot {
 }
 
 /** The options a person is shown; a carried menu is not one. */
-export const visibleChoices = (choices: Choice[] | null | undefined): Choice[] => (choices ?? []).filter((c) => !c.menu);
+export const visibleChoices = (choices: Choice[] | null | undefined): Choice[] => (choices ?? []).filter((c) => !c.menu && !c.aside);
 
 /** The carried menu as Claude reads it back in his own earlier turn, ids included, so he can order from it. */
 export function menuLines(menu: MenuSnapshot): string {
@@ -86,7 +101,7 @@ export interface PlaceInfo {
   /** Where `miles` is measured from when it isn't the saved address: the landmark, venue or area the person named ("Pantages Theatre"). */
   from?: string;
   /** How long it takes to get there from the same origin, by Google's routing: on foot around a named spot, by road otherwise. */
-  travel?: { mode: "WALK" | "DRIVE"; minutes: number };
+  travel?: { mode: "WALK" | "DRIVE"; minutes: number; /** Road or path miles, from the routing. */ miles?: number };
   /** Open when Wally answered. Only meaningful while the message is fresh. */
   open?: boolean;
   rating?: number;
@@ -115,11 +130,19 @@ export const fastFoodAsk = (choices: Choice[] | null | undefined) => {
 /** The line under a set of place cards that offers the quick-service kind next. */
 export const FAST_FOOD_LINE = "Fast food or a drive-thru? Just say so.";
 
-/** "6 min walk" or "12 min drive", or the straight-line miles when the search gave no travel time; with where it is from, when that isn't the saved address. */
+/** The travel time and the distance: "12 min drive (2.1 mi)", or the straight-line miles when the search gave no travel time; with where it is from, when that isn't the saved address. */
 export function howFar(p: Pick<PlaceInfo, "miles" | "from" | "travel"> | undefined): string | undefined {
   if (!p) return undefined;
-  const how = p.travel ? `${p.travel.minutes} min ${p.travel.mode === "WALK" ? "walk" : "drive"}` : p.miles !== undefined ? `${p.miles} mi` : undefined;
+  const miles = p.travel?.miles ?? p.miles;
+  const how = p.travel ? `${p.travel.minutes} min ${p.travel.mode === "WALK" ? "walk" : "drive"}${miles !== undefined ? ` (${miles} mi)` : ""}` : miles !== undefined ? `${miles} mi` : undefined;
   return how ? `${how}${p.from ? ` from ${p.from}` : ""}` : undefined;
+}
+
+/** The two halves of howFar for a card: the time and distance, and where from. */
+export function howFarParts(p: Pick<PlaceInfo, "miles" | "from" | "travel">): { how: string | undefined; from: string | undefined } {
+  const miles = p.travel?.miles ?? p.miles;
+  const how = p.travel ? `${p.travel.minutes} min ${p.travel.mode === "WALK" ? "walk" : "drive"}${miles !== undefined ? ` · ${miles} mi` : ""}` : miles !== undefined ? `${miles} mi` : undefined;
+  return { how, from: p.from };
 }
 
 /** A web page Wally drew on for an answer. */
@@ -211,10 +234,13 @@ export function asTexts(message: Pick<ChatMessage, "content" | "choices">, origi
     ].filter(Boolean);
     const site = p ? p.website : c.url;
     const links = site ? [tidyLink(site)] : p ? textDeliveryLinks(c.title, origin).map((l) => `${l.app}: ${l.url}`) : [];
+    // Every place gets its map, so a text can be followed to the door.
+    if (p?.maps) links.push(`Map: ${tidyLink(p.maps)}`);
     return [`${i + 1}. ${c.emoji ? `${c.emoji} ` : ""}${c.title}`, facts.join(" · "), c.detail, ...links].filter(Boolean).join("\n");
   });
   // Every set of options closes with the way into the same conversation on the website.
-  const more = `${offersFastFood(message.choices) ? `${FAST_FOOD_LINE}\n` : ""}Visit Wally for more options: ${tidyLink(`${origin}/ask`)}${sayInSync ? "\nIt's this same conversation, always in sync with our texts." : ""}`;
+  const closed = asideOf(message.choices)?.closed;
+  const more = `${closed ? `${closedLine(closed)}\n` : ""}${offersFastFood(message.choices) ? `${FAST_FOOD_LINE}\n` : ""}Visit Wally for more options: ${tidyLink(`${origin}/ask`)}${sayInSync ? "\nIt's this same conversation, always in sync with our texts." : ""}`;
   return [message.content.trim(), cards.length ? `${cards.join("\n\n")}\n\n${more}` : ""].filter(Boolean);
 }
 

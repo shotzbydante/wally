@@ -1,5 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
-import { CURRENT_LOCATION, asPlainText, cityOf, hostOf, isOwnSite, withSources, type ChatMessage, type Choice, type MenuSnapshot, type Source, type TicketInfo } from "@/lib/chat";
+import { CURRENT_LOCATION, asPlainText, cityOf, hostOf, isOwnSite, withSources, type Aside, type ChatMessage, type Choice, type MenuSnapshot, type Source, type TicketInfo } from "@/lib/chat";
 import { chainOf } from "@/lib/chains";
 import type { Channel } from "./conversation";
 import type { CartItem, MenuEntry, Venue } from "@wally/core";
@@ -48,7 +48,7 @@ const FINDING_WITH_PLACES = `# Finding places
 - If they have no saved address (see the guest notes) and haven't named somewhere, ask them in one short line to add their address in the bar at the top of the page, or to name an area.
 - Results near the saved address are held to about 25 miles around it; around a named spot, a few miles. If nothing fits, say so and offer to look in a named area, or further out.
 - Don't announce that you're going to look. Just call the tool.
-- Then call show_places with the ids of the four that fit best (fewer only if fewer fit), favoring places that are open and close by. For each place give a few words on what it is or is known for. The card already shows distance, open or closed, rating and price, so never repeat those in a card's line.
+- Then call show_places with the ids of the four that fit best (fewer only if fewer fit). Open now comes first: pick from the places that are open, and leave closed ones off unless nothing that fits is open (then show the best closed ones and say plainly that they're closed right now). Say in the intro that your picks are open now, with the closing time of the top pick when you have it. Closed places that fit are offered to the person automatically under the cards; when they ask for them ("the ones that aren't open right now too"), call find_places again and show the best of the closed ones, each marked closed, with when they open if you know it (you usually don't: say to check). For each place give a few words on what it is or is known for. The card already shows distance, open or closed, rating and price, so never repeat those in a card's line.
 - Every show_places call must carry your recommendation in its intro field. It is shown above the cards, and cards never go out without it. Don't also type it as a message before the tool.
 - The intro is one or two sentences, under 40 words (up to 70, in three sentences, when the search was around a named spot, so the walk-or-drive picture and the quality of the picks both fit), in your own voice: a waiter who has opinions and enjoys this. Lead with your top pick by name and why, using what find_places told you (what it's known for, it's the closest, it's still open and until when, it's the best rated, its price). You may add one more standout. A little warmth or wit is welcome ("If it were my night off, I'd head to..."); a dry list of facts is not. Don't walk through every place; the cards do that.
 - known_for is the listing's own description of a place. When a place has one, use it: say what the place is known for in your recommendation and in its card's reason, in your own few words. It is the only thing you know about what a place serves. If a place has no known_for, don't guess one.
@@ -529,7 +529,7 @@ export function placeChoices(input: unknown, found: ReadonlyMap<string, FoundPla
         id: place.id,
         ...(place.miles !== undefined ? { miles: place.miles } : {}),
         ...(place.from ? { from: place.from } : {}),
-        ...(place.travel ? { travel: { mode: place.travel.mode, minutes: place.travel.minutes } } : {}),
+        ...(place.travel ? { travel: { mode: place.travel.mode, minutes: place.travel.minutes, miles: place.travel.miles } } : {}),
         ...(place.open !== null ? { open: place.open } : {}),
         ...(place.rating !== null ? { rating: place.rating } : {}),
         ...(place.price ? { price: place.price } : {}),
@@ -896,6 +896,13 @@ export async function reply(thread: ChatMessage[], guest: Guest, channel: Channe
     choices ??= readChoices(choicesInput, hosts);
     const said = text.trim();
     if (!said && !choices) throw new AgentError("failed");
+    // Places that fit but were closed are left off the cards; the page and a text offer them next.
+    if (choices?.some((c) => c.place)) {
+      const onCards = new Set(choices.flatMap((c) => (c.place ? [c.place.id] : [])));
+      const closed = [...found.values()].filter((p) => p.open === false && !onCards.has(p.id) && !shown.has(p.id)).length;
+      const aside: Aside = { ...(closed ? { closed } : {}) };
+      if (Object.keys(aside).length) choices = [...choices, { emoji: "", title: "", detail: "", reply: "", aside }];
+    }
     // An order still being decided keeps its menu with the answer, so the next turn can ticket it without reading the menu again.
     if (menu && !ticketed) {
       const carried: MenuSnapshot = { ...menu, age: menuUsed ? 0 : menu.age + 1 };
