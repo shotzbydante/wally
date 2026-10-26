@@ -235,7 +235,7 @@ export function asTexts(message: Pick<ChatMessage, "content" | "choices">, origi
     const site = p ? p.website : c.url;
     const links = site ? [tidyLink(site)] : p ? textDeliveryLinks(c.title, origin).map((l) => `${l.app}: ${l.url}`) : [];
     // Every place gets its map, so a text can be followed to the door.
-    if (p?.maps) links.push(`Map: ${tidyLink(p.maps)}`);
+    if (p?.maps) links.push(`Map: ${shortMapLink(p.maps, origin)}`);
     return [`${i + 1}. ${c.emoji ? `${c.emoji} ` : ""}${c.title}`, facts.join(" · "), c.detail, ...links].filter(Boolean).join("\n");
   });
   // Every set of options closes with the way into the same conversation on the website.
@@ -321,6 +321,55 @@ export function textDeliveryLinks(name: string, origin: string): { app: string; 
   const slug = name.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/['\u2019]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 60);
   if (!slug) return [];
   return deliveryLinks(name).map((l) => ({ app: l.app, url: tidyLink(`${origin}/go/${l.app.toLowerCase().replace(/\s/g, "")}/${slug}`) }));
+}
+
+const BASE62 = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+
+/** A Google Maps place number (its `cid`) as a dozen characters, and back. */
+export function encodeCid(cid: string): string {
+  const sixtyTwo = BigInt(62);
+  let n = BigInt(cid);
+  if (n === BigInt(0)) return "0";
+  let out = "";
+  while (n > BigInt(0)) {
+    out = BASE62[Number(n % sixtyTwo)] + out;
+    n /= sixtyTwo;
+  }
+  return out;
+}
+export function decodeCid(code: string): string | null {
+  if (!/^[0-9A-Za-z]{1,13}$/.test(code)) return null;
+  let n = BigInt(0);
+  for (const ch of code) n = n * BigInt(62) + BigInt(BASE62.indexOf(ch));
+  return n.toString();
+}
+
+/**
+ * The map link as a text carries it: /m/<code> on Wally's own site, which
+ * sends the phone to the place on Google Maps. Google's own link runs to a
+ * hundred characters of tracking; a text has no room for that. The code is
+ * the place's Maps number (cid) in base 62, or its place ID after "p.".
+ */
+export function shortMapLink(maps: string, origin: string): string {
+  try {
+    const u = new URL(maps);
+    const cid = u.searchParams.get("cid");
+    if (cid && /^\d{1,20}$/.test(cid)) return tidyLink(`${origin}/m/${encodeCid(cid)}`);
+    const q = u.searchParams.get("q") ?? "";
+    const id = /^place_id:([A-Za-z0-9_-]{10,100})$/.exec(q)?.[1];
+    if (id) return tidyLink(`${origin}/m/p.${id}`);
+  } catch {}
+  return tidyLink(maps);
+}
+
+/** Where a short map code leads: the place on Google Maps, or nothing for a code that isn't one. */
+export function mapLinkFor(code: string): string | null {
+  if (code.startsWith("p.")) {
+    const id = code.slice(2);
+    return /^[A-Za-z0-9_-]{10,100}$/.test(id) ? `https://www.google.com/maps/place/?q=place_id:${encodeURIComponent(id)}` : null;
+  }
+  const cid = decodeCid(code);
+  return cid ? `https://maps.google.com/?cid=${cid}` : null;
 }
 
 /**
