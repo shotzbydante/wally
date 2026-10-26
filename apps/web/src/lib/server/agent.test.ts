@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { asPlainText, asTexts, textDeliveryLinks, isOwnSite, tidyLink, webNudgeDue, splitSources, withSources, type ChatMessage } from "@/lib/chat";
+import { asPlainText, asTexts, decodeCid, encodeCid, mapLinkFor, shortMapLink, textDeliveryLinks, isOwnSite, tidyLink, webNudgeDue, splitSources, withSources, type ChatMessage } from "@/lib/chat";
 import { describePlaces, readChoices, readWeb, toClaudeMessages, withHistoryCache, type FoundPlace } from "./agent";
 
 const message = (id: number, role: ChatMessage["role"], content: string, choices: ChatMessage["choices"] = null): ChatMessage => ({
@@ -157,7 +157,7 @@ describe("asTexts", () => {
   it("sends his words and the cards as separate texts, a small card per place", () => {
     expect(asTexts({ content: "Insomnia is my pick.", choices: [cookies, closed] }, "https://wallywaiter.com")).toEqual([
       "Insomnia is my pick.",
-      "1. 🍪 Insomnia Cookies\nOpen now · 2.8 mi · ★ 4.5 · $\nOpen late, warm cookies\ninsomniacookies.com\nMap: https://maps.google.com/?cid=1\n\n2. 🥛 DeLuscious\nClosed · 1.1 mi\nDoorDash: wallywaiter.com/go/doordash/deluscious\nUber Eats: wallywaiter.com/go/ubereats/deluscious\nMap: https://maps.google.com/?cid=2\n\nFast food or a drive-thru? Just say so.\nVisit Wally for more options: wallywaiter.com/ask",
+      "1. 🍪 Insomnia Cookies\nOpen now · 2.8 mi · ★ 4.5 · $\nOpen late, warm cookies\ninsomniacookies.com\nMap: wallywaiter.com/m/1\n\n2. 🥛 DeLuscious\nClosed · 1.1 mi\nDoorDash: wallywaiter.com/go/doordash/deluscious\nUber Eats: wallywaiter.com/go/ubereats/deluscious\nMap: wallywaiter.com/m/2\n\nFast food or a drive-thru? Just say so.\nVisit Wally for more options: wallywaiter.com/ask",
     ]);
     expect(asTexts({ content: "Just words.", choices: null }, "https://wallywaiter.com")).toEqual(["Just words."]);
     // Around a spot the person named, the distance says where it is from.
@@ -195,5 +195,24 @@ describe("asTexts", () => {
     expect(webNudgeDue([said("web", "2026-10-13T05:00:00Z")], now)).toBe(true);
     expect(webNudgeDue([said("text", "2026-10-12T05:00:00Z")], now)).toBe(false);
     expect(webNudgeDue([said("text", "2026-10-01T05:00:00Z")], now)).toBe(true);
+  });
+});
+
+describe("short map links", () => {
+  it("turns Google's long place link into a dozen characters on Wally's site, and back", () => {
+    const long = "https://maps.google.com/?cid=3695702565455723140&g_mp=Cidnb29nbGUubWFwcy5wbGFjZXMudjEuUGxhY2VzLlNlYXJjaFRleHQQAhgEIAA";
+    const short = shortMapLink(long, "https://www.wallywaiter.com");
+    expect(short).toMatch(/^wallywaiter\.com\/m\/[0-9A-Za-z]{1,12}$/);
+    expect(mapLinkFor(short.split("/m/")[1]!)).toBe("https://maps.google.com/?cid=3695702565455723140");
+    expect(decodeCid(encodeCid("18446744073709551615"))).toBe("18446744073709551615");
+    expect(decodeCid(encodeCid("0"))).toBe("0");
+  });
+  it("falls back to the place ID, and refuses anything else", () => {
+    expect(shortMapLink("https://www.google.com/maps/place/?q=place_id:ChIJN1t_tDeuEmsRUsoyG83frY4", "https://wallywaiter.com")).toBe("wallywaiter.com/m/p.ChIJN1t_tDeuEmsRUsoyG83frY4");
+    expect(mapLinkFor("p.ChIJN1t_tDeuEmsRUsoyG83frY4")).toBe("https://www.google.com/maps/place/?q=place_id:ChIJN1t_tDeuEmsRUsoyG83frY4");
+    expect(mapLinkFor("p.../etc")).toBeNull();
+    expect(mapLinkFor("not a code!")).toBeNull();
+    expect(mapLinkFor("")).toBeNull();
+    expect(shortMapLink("https://maps.example/x", "https://wallywaiter.com")).toBe("maps.example/x");
   });
 });
