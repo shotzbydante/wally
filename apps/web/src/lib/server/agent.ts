@@ -897,7 +897,8 @@ export async function reply(thread: ChatMessage[], guest: Guest, channel: Channe
     const said = text.trim();
     if (!said && !choices) throw new AgentError("failed");
     // Places that fit but were closed are left off the cards; the page and a text offer them next.
-    if (choices?.some((c) => c.place)) {
+    // Not under an answer that is itself the closed ones: there is nothing further to offer there.
+    if (choices?.some((c) => c.place && c.place.open !== false)) {
       const onCards = new Set(choices.flatMap((c) => (c.place ? [c.place.id] : [])));
       const closed = [...found.values()].filter((p) => p.open === false && !onCards.has(p.id) && !shown.has(p.id)).length;
       const aside: Aside = { ...(closed ? { closed } : {}) };
