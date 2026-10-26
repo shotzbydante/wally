@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type CS
 import { LocationBar } from "@/components/LocationBar";
 import { Wally } from "@/components/Wally";
 import { WallyFace, type WallyLook } from "@/components/WallyFace";
-import { MAX_MESSAGE_CHARS, OPEN_BADGE_MINUTES, deliveryLinks, dollars, fastFoodAsk, hostOf, isOwnSite, offersFastFood, splitSources, visibleChoices, type ChatEvent, type ChatMessage, type Choice, type TicketInfo } from "@/lib/chat";
+import { CLOSED_ASK, MAX_MESSAGE_CHARS, OPEN_BADGE_MINUTES, asideOf, deliveryLinks, dollars, fastFoodAsk, hostOf, howFarParts, isOwnSite, offersFastFood, splitSources, visibleChoices, type ChatEvent, type ChatMessage, type Choice, type TicketInfo } from "@/lib/chat";
 import { SiteIcon } from "@/components/SiteIcon";
 
 /** What Wally is doing, which drives how he moves and what his bubble says. */
@@ -393,7 +393,7 @@ export function AskWally({
             m.role === "user" ? (
               <UserBubble key={m.id} text={m.content} byText={m.channel === "text"} />
             ) : (
-              <WallyTurn key={m.id} text={m.content} at={m.created_at} byText={m.channel === "text"} choices={m.choices} live={m.id === lastId && !busy && ready} onPick={(c) => void send(c.reply)} onMore={() => void send("Show me 4 more")} onFastFood={() => void send(fastFoodAsk(m.choices))} />
+              <WallyTurn key={m.id} text={m.content} at={m.created_at} byText={m.channel === "text"} choices={m.choices} live={m.id === lastId && !busy && ready} onPick={(c) => void send(c.reply)} onMore={() => void send("Show me 4 more")} onFastFood={() => void send(fastFoodAsk(m.choices))} onClosed={() => void send(CLOSED_ASK)} />
             ),
           )}
 
@@ -616,6 +616,7 @@ function WallyTurn({
   onPick,
   onMore,
   onFastFood,
+  onClosed,
 }: {
   text: string;
   /** When Wally said it. */
@@ -630,6 +631,8 @@ function WallyTurn({
   onMore?: () => void;
   /** Asks for the fast-food and drive-thru kind of answer, around the same spot. */
   onFastFood?: () => void;
+  /** Asks for the places that fit but were closed. */
+  onClosed?: () => void;
 }) {
   // Sources ride along in the text (see splitSources); here they become links.
   const { text: said, sources } = splitSources(text);
@@ -670,13 +673,10 @@ function WallyTurn({
                       {c.title}
                       {c.place?.orders && <OrderCheck />}
                     </span>
-                    {(c.place?.travel || c.place?.miles !== undefined) && (
-                      <span
-                        className="shrink-0 text-[0.8rem] font-semibold text-ink-soft tabular-nums"
-                        title={[c.place.miles !== undefined && `${c.place.miles} miles`, c.place.from && `from ${c.place.from}`].filter(Boolean).join(" ") || undefined}
-                      >
-                        {c.place.travel ? `${c.place.travel.minutes} min ${c.place.travel.mode === "WALK" ? "walk" : "drive"}` : `${c.place.miles} mi`}
-                        {c.place.from ? <span className="font-normal"> from {c.place.from}</span> : <span className="sr-only"> away</span>}
+                    {c.place && howFarParts(c.place).how && (
+                      <span className="shrink-0 text-right text-[0.8rem] font-semibold text-ink-soft tabular-nums" title={c.place.miles !== undefined ? `${c.place.miles} miles as the crow flies` : undefined}>
+                        {howFarParts(c.place).how}
+                        {c.place.from ? <span className="block font-normal"> from {c.place.from}</span> : <span className="sr-only"> away</span>}
                       </span>
                     )}
                   </span>
@@ -726,8 +726,13 @@ function WallyTurn({
           <p className="text-[0.8125rem] leading-tight whitespace-nowrap" style={{ fontFamily: "Roboto, sans-serif", fontWeight: 400, color: "#5E5E5E" }}>
             <span translate="no">Google Maps</span>
           </p>
-          {live && (onMore || onFastFood) && (
-            <span className="flex items-center gap-1.5">
+          {live && (onMore || onFastFood || onClosed) && (
+            <span className="flex flex-wrap items-center justify-end gap-1.5">
+              {onClosed && asideOf(choices)?.closed && (
+                <button type="button" onClick={onClosed} className="press inline-flex h-7 items-center gap-1 rounded-full bg-pad px-3 text-[0.8rem] font-semibold text-ink-soft ring-1 ring-line ring-inset hover:ring-ink">
+                  <span aria-hidden="true">🌙</span> {asideOf(choices)!.closed} closed right now
+                </button>
+              )}
               {onFastFood && offersFastFood(choices) && (
                 <button type="button" onClick={onFastFood} className="press inline-flex h-7 items-center gap-1 rounded-full bg-pad px-3 text-[0.8rem] font-semibold text-ink-soft ring-1 ring-line ring-inset hover:ring-ink">
                   <span aria-hidden="true">🚗</span> Fast food &amp; drive-thru
