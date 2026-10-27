@@ -1,6 +1,8 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { CURRENT_LOCATION, asPlainText, cityOf, hostOf, isOwnSite, withSources, type Aside, type ChatMessage, type Choice, type MenuSnapshot, type Source, type TicketInfo } from "@/lib/chat";
 import { chainOf } from "@/lib/chains";
+import { chainMenuFor, describeChainMenu } from "./chain-menus";
+import { readSiteMenu, readableSite } from "./menu-site";
 import type { Channel } from "./conversation";
 import type { CartItem, MenuEntry, Venue } from "@wally/core";
 import { isConnectorError, mayHandOff, nameMatches, orderingConfigured, orderingConnector, sameStore, zipOf } from "./ordering";
@@ -61,7 +63,13 @@ const FINDING_WITH_PLACES = `# Finding places
 - When the person asks what they can order from, or for a cuisine they can order from ("mexican spots you can order from"): for a cuisine, call find_places for it and show every can_order match first, then fill the four with the best others. For no cuisine, call find_orderable_places and show all of its ids. Either way the intro says plainly which cards you can order from right here, and that the rest are ordered through the chips on their card (the restaurant's own site or a delivery app). If no can_order place fits, say so in one line and still show the best others.
 - Each card links to the restaurant's own site (the Website chip) first, then to delivery apps. When someone asks how to order from a place, point them to its own site first and mention the apps as the alternative.
 - If nothing fits, say so plainly and suggest widening the search.
-- You can't look up a restaurant's menu, dishes or booking rules. Point the person to the Website link on its card.`;
+- You can't look up a restaurant's booking rules. For its menu, see "Menus".`;
+
+const MENUS = `# Menus
+- When someone asks what a place serves, about a dish, what's in it, sizes, calories, prices, or wants to "tee up" or order something somewhere you can't build the order, call read_menu with the restaurant's name as it appears on a card or as they said it, and what they're asking about in looking_for. It reads the restaurant's own website (never a delivery app), or, for the big chains, the menu Wally keeps. Then answer from what it returns, in your own words, and name the source in passing ("from their site", "on McDonald's menu").
+- Say only what read_menu returned. A price from a site can be out of date, and a chain's prices vary by location: say so in a few words when you quote one, and never quote a price read_menu didn't give. Calories are the chain's own published figures.
+- When read_menu says the site can't be read (it's a PDF, an ordering platform's page, or nothing menu-like), say so plainly and point to the Website link on the card, or the PDF it names.
+- When the person names a well-known national chain, call read_menu before find_menu; it says whether Wally can build orders there. For one that doesn't take orders through Wally, never ask for a ZIP: describe what they asked for from the menu, say that ordering is through the chain's own app or the delivery apps on its card, and offer to find the nearest one that's open now. That is the whole answer; no apology.`;
 
 const FINDING_WITH_WEB = `# Finding places
 - Search the web with web_search when the person wants specific places, what's nearby, what's open, a particular restaurant's details, or anything current. Don't search for general food advice, taste or cooking questions you can answer yourself.
@@ -116,6 +124,8 @@ This matters as much as what you say. A good waiter is brief.
 - Talk through cooking and food questions.
 
 ${hasPlaces ? FINDING_WITH_PLACES : FINDING_WITH_WEB}
+
+${MENUS}
 ${canOrder ? `
 ${ORDERING}
 ` : ""}
@@ -249,6 +259,21 @@ export function storeNamedFor(store: { name: string }, query: string): boolean {
 /** How many orderable places are looked up for one answer: each is a Places search. */
 const MAX_ORDERABLE = 8;
 
+const READ_MENU_TOOL: Anthropic.Tool = {
+  name: "read_menu",
+  description:
+    "Reads a restaurant's menu: for the big chains, the menu Wally keeps (items, what's in them, calories, sizes, breakfast hours, how ordering works there); for anyone else, the restaurant's own website, as structured menu data when the site publishes it or its menu text otherwise. Use it to answer what a place serves, what's in a dish, calories or prices, and before find_menu when the place is a national chain. Never a delivery app's page.",
+  input_schema: {
+    type: "object",
+    properties: {
+      restaurant: { type: "string", description: "The restaurant's name, as on its card or as the person said it." },
+      looking_for: { type: "string", description: "What they're asking about, in a few words: 'quarter pounder', 'vegetarian options', 'brunch prices'. Leave out for the whole menu." },
+      website: { type: "string", description: "The restaurant's own site, only if the person gave it and it isn't on any card." },
+    },
+    required: ["restaurant"],
+  },
+};
+
 const ORDERABLE_PLACES_TOOL: Anthropic.Tool = {
   name: "find_orderable_places",
   description: "Finds the restaurants near the person where you can build a pickup order, nearest first. Use it when they ask what you can order from, then call show_places with the ids it returns.",
@@ -327,6 +352,19 @@ export function savedMenu(thread: ChatMessage[]): MenuFound | null {
     return carried && carried.age < MENU_TURNS ? carried : null;
   }
   return null;
+}
+
+/** The lines of a menu text that answer to a few words, with their neighbours, ahead of the rest, within a budget. */
+export function pickLines(text: string, lookingFor: string, budget = 6000): string {
+  const words = lookingFor.toLowerCase().replace(/[^a-z0-9 ]/g, " ").split(/\s+/).filter((w) => w.length > 2);
+  if (!words.length || text.length <= budget) return text.slice(0, budget);
+  const lines = text.split("\n");
+  const keep = new Set<number>();
+  lines.forEach((line, i) => {
+    if (words.some((w) => line.toLowerCase().includes(w))) for (let j = Math.max(0, i - 1); j <= Math.min(lines.length - 1, i + 2); j++) keep.add(j);
+  });
+  const hits = [...keep].sort((a, b) => a - b).map((i) => lines[i]!).join("\n");
+  return hits ? `${hits}\n…\n${text}`.slice(0, budget) : text.slice(0, budget);
 }
 
 /** Loose match between the name the person used and a venue's listed name. */
@@ -448,6 +486,13 @@ export type FoundPlace = Place & { miles?: number; from?: string; shown?: boolea
 export const WALK_MILES = 0.8;
 /** How long a named spot's name may run on a card. */
 const FROM_CHARS = 28;
+
+/** The places on cards in this conversation, newest first, with their sites: what read_menu can look up by name. */
+export function shownSites(thread: ChatMessage[]): { name: string; website?: string }[] {
+  const out: { name: string; website?: string }[] = [];
+  for (let i = thread.length - 1; i >= 0; i--) for (const c of thread[i]!.choices ?? []) if (c.place) out.push({ name: c.title, ...(c.place.website ? { website: c.place.website } : {}) });
+  return out;
+}
 
 /** Google's ids of the places already shown on cards in this conversation, so "see more" brings new ones. */
 export function shownPlaces(thread: ChatMessage[]): Set<string> {
@@ -706,6 +751,48 @@ export async function reply(thread: ChatMessage[], guest: Guest, channel: Channe
     }
   };
 
+  /** Runs one read_menu call: a kept chain menu, or the restaurant's own site, found by name among the places on cards. */
+  const readMenu = async (input: unknown): Promise<{ content: string; is_error?: boolean }> => {
+    const args = (input ?? {}) as { restaurant?: unknown; looking_for?: unknown; website?: unknown };
+    const name = clip(args.restaurant, 80);
+    const lookingFor = clip(args.looking_for, 80) || undefined;
+    if (!name) return { content: "Give the restaurant's name.", is_error: true };
+    const kept = chainMenuFor(name);
+    if (kept) {
+      const orders = canOrder && (await orderableStores().catch(() => [] as Venue[])).some((v) => storeMatches(name, v));
+      return {
+        content: JSON.stringify({
+          ...(JSON.parse(describeChainMenu(kept, lookingFor)) as Record<string, unknown>),
+          orders_through_wally: orders,
+          how_to_order: orders ? "Wally can build a pickup order here with find_menu." : `Not through Wally: order in ${kept.chain}'s own app or site, or through the delivery apps on its card.`,
+        }),
+      };
+    }
+    // The site: this turn's search results first, then earlier cards, then one the person gave.
+    const fromSearch = [...found.values()].find((p) => nameMatches(name, p.name) || nameMatches(p.name, name));
+    const fromCards = shownSites(thread).find((p) => nameMatches(name, p.name) || nameMatches(p.name, name));
+    const website = fromSearch?.website ?? fromCards?.website ?? (typeof args.website === "string" ? args.website.trim() : undefined);
+    const known = fromSearch?.name ?? fromCards?.name ?? name;
+    if (!website) return { content: JSON.stringify({ restaurant: known, readable: false, note: fromSearch || fromCards ? "This place lists no website, so its menu can't be read. Point to the delivery app chips on its card." : "No site is known for that place. Call find_places for it first, so it has a card, or ask the person for its website." }) };
+    if (!readableSite(website)) return { content: JSON.stringify({ restaurant: known, readable: false, website, note: "Its listed site is an ordering platform or marketplace page, which Wally doesn't read. Point the person to the Website link on its card for the menu." }) };
+    const menu = await readSiteMenu(website);
+    if (!menu) return { content: JSON.stringify({ restaurant: known, readable: false, website, note: "Nothing menu-like could be read from the site. Point the person to the Website link on its card." }) };
+    const orders = canOrder && (await orderableStores().catch(() => [] as Venue[])).some((v) => storeMatches(known, v));
+    const text = lookingFor ? pickLines(menu.text, lookingFor) : menu.text;
+    return {
+      content: JSON.stringify({
+        restaurant: known,
+        readable: true,
+        menu_source: menu.source,
+        ...(menu.items.length ? { items: menu.items.slice(0, 120) } : {}),
+        ...(text ? { menu_text: text } : {}),
+        ...(menu.pdfs.length ? { menu_pdfs: menu.pdfs } : {}),
+        orders_through_wally: orders,
+        note: "Read from the restaurant's own site just now; prices there may be out of date. Say only what is here.",
+      }),
+    };
+  };
+
   /** Runs one find_menu call: find the store by name near the person's ZIP, then search its menu. */
   const findMenu = async (input: unknown): Promise<{ content: string; is_error?: boolean }> => {
     const args = (input ?? {}) as { restaurant?: unknown; dish?: unknown; zip?: unknown };
@@ -803,7 +890,7 @@ export async function reply(thread: ChatMessage[], guest: Guest, channel: Channe
         ],
         // Places come from the places search when it is on. Web search is only the fallback
         // without it, so review and listing sites never appear beside real place cards.
-        tools: [...(hasPlaces ? [FIND_PLACES_TOOL, SHOW_PLACES_TOOL] : [searchTool(guest)]), ...(canOrder ? [FIND_MENU_TOOL, ORDER_TICKET_TOOL, ...(hasPlaces ? [ORDERABLE_PLACES_TOOL] : [])] : []), CHOICES_TOOL],
+        tools: [...(hasPlaces ? [FIND_PLACES_TOOL, SHOW_PLACES_TOOL] : [searchTool(guest)]), READ_MENU_TOOL, ...(canOrder ? [FIND_MENU_TOOL, ORDER_TICKET_TOOL, ...(hasPlaces ? [ORDERABLE_PLACES_TOOL] : [])] : []), CHOICES_TOOL],
         // One tool at a time: a search has to finish before options are shown.
         tool_choice: { type: "auto", disable_parallel_tool_use: true },
         messages: withHistoryCache(messages),
@@ -811,7 +898,7 @@ export async function reply(thread: ChatMessage[], guest: Guest, channel: Channe
       stream.on("streamEvent", (event) => {
         if (event.type === "content_block_start") {
           const block = event.content_block;
-          if (block.type === "server_tool_use" || (block.type === "tool_use" && [FIND_PLACES_TOOL.name, FIND_MENU_TOOL.name, ORDER_TICKET_TOOL.name, ORDERABLE_PLACES_TOOL.name].includes(block.name))) listener.onSearch?.();
+          if (block.type === "server_tool_use" || (block.type === "tool_use" && [FIND_PLACES_TOOL.name, FIND_MENU_TOOL.name, ORDER_TICKET_TOOL.name, ORDERABLE_PLACES_TOOL.name, READ_MENU_TOOL.name].includes(block.name))) listener.onSearch?.();
           if (block.type !== "text" && block.type !== "thinking") breakBeforeText = true;
         } else if (event.type === "content_block_delta" && event.delta.type === "text_delta") write(event.delta.text);
       });
@@ -844,6 +931,10 @@ export async function reply(thread: ChatMessage[], guest: Guest, channel: Channe
       }
       if (tool.name === FIND_MENU_TOOL.name) {
         answer(await findMenu(tool.input));
+        continue;
+      }
+      if (tool.name === READ_MENU_TOOL.name) {
+        answer(await readMenu(tool.input));
         continue;
       }
       if (tool.name === ORDERABLE_PLACES_TOOL.name) {
