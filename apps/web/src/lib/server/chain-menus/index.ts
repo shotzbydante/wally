@@ -36,8 +36,8 @@ export function describeChainMenu(menu: ChainMenu, lookingFor?: string): string 
   const query = lookingFor ? words(lookingFor) : [];
   const line = (item: ChainMenuItem) =>
     [
-      `${item.name}${item.calories !== undefined ? ` (${item.calories} cal)` : ""}: ${item.description}`,
-      item.sizes?.length ? `Sizes: ${item.sizes.map((s) => `${s.size}${s.calories !== undefined ? ` ${s.calories} cal` : ""}`).join(", ")}.` : "",
+      `${item.name}${item.calories !== undefined ? ` (${item.calories} cal${item.servingSize ? `, ${item.servingSize.toLowerCase()}` : ""})` : ""}: ${item.description}`,
+      item.sizes?.length ? `Sizes: ${item.sizes.map((s) => `${s.size} ${s.calories} cal`).join(", ")}.` : "",
       item.options?.length ? `${item.options.join("; ")}.` : "",
       item.tags?.includes("limited time") ? "Limited time." : "",
     ]
