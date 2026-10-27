@@ -22,7 +22,7 @@ describe("kept chain menus", () => {
       if (item.calories !== undefined) expect(item.calories).toBeGreaterThanOrEqual(0);
     }
     const names = items.map((i) => i.name);
-    for (const name of ["Big Mac", "Quarter Pounder with Cheese", "Chicken McNuggets", "World Famous Fries", "Egg McMuffin", "Filet-O-Fish", "McFlurry with OREO Cookies"]) expect(names.some((n) => n.startsWith(name))).toBe(true);
+    for (const name of ["Big Mac", "Quarter Pounder with Cheese", "Chicken McNuggets", "World Famous Fries", "Egg McMuffin", "Filet-O-Fish", "OREO McFlurry"]) expect(names.some((n) => n.startsWith(name))).toBe(true);
   });
   it("answers a question with the matching items first, then everything else by name", () => {
     const told = JSON.parse(describeChainMenu(mcdonalds, "quarter pounder with cheese and fries")) as { restaurant: string; notes: string[]; matches: string[]; everything_else: string[] };
