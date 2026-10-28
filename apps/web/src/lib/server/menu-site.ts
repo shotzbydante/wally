@@ -20,7 +20,7 @@ export const USER_AGENT = "WallyBot/1.0 (+https://www.wallywaiter.com)";
 const PLATFORM_HOSTS = ["toasttab.com", "square.site", "squareup.com", "chownow.com", "slicelife.com", "clover.com", "ezcater.com", "order.online", "ordering.app", "menufy.com", "owner.com", "spoton.com", "bentobox.com", "getbento.com"];
 
 /** Pages, bytes and characters a read may take: enough for a menu, not a crawl. */
-const MAX_PAGES = 4;
+const MAX_PAGES = 5;
 const MAX_BYTES = 1_500_000;
 const MAX_TEXT = 12_000;
 const PAGE_TIMEOUT_MS = 8000;
@@ -142,7 +142,8 @@ export function pageText(html: string): string {
   s = s.replace(/<(br|hr)\s*\/?>/gi, "\n");
   s = s.replace(/<\/(p|div|li|tr|td|th|h[1-6]|section|article|dt|dd|ul|ol|table|blockquote|figcaption|summary|details)>/gi, "\n");
   s = s.replace(/<[^>]+>/g, " ");
-  s = decodeEntities(s);
+  // Markup a page shows escaped ("&lt;p&gt;Fries&lt;/p&gt;", as some site builders do) is markup too, once decoded.
+  s = decodeEntities(s).replace(/<\/?[a-z][a-z0-9]*\b[^>]*>/gi, " ");
   const seen = new Set<string>();
   const lines: string[] = [];
   for (const raw of s.split(/\n+/)) {
@@ -152,6 +153,56 @@ export function pageText(html: string): string {
     lines.push(line);
   }
   return lines.join("\n");
+}
+
+/** Lines a site repeats on every page (social links, the cart, job and event links): never part of a menu. */
+const FURNITURE = /^(facebook|instagram|twitter|x|tiktok|yelp|youtube|linkedin|apply( for a job)?|careers?|jobs?|book (your|an) event|events?|gift cards?|cart|\d+ items?|log ?in|sign (in|up)|subscribe( to our newsletter)?|newsletter|search|home|about( us)?|contact( us)?|privacy policy|terms( of (use|service))?|accessibility|skip to (main )?content|menu|close|back to top)$/i;
+
+/**
+ * The words that head a menu's sections ("Famous Burgers", "Sides", "Drinks"):
+ * a page with several of them is a menu even when it prints no prices.
+ */
+const SECTION_WORDS = /\b(starters?|appetizers?|apps|small plates|shareables?|salads?|soups?|sandwiches|burgers?|hot ?dogs|entr[ée]es?|mains|main courses?|pizzas?|pastas?|tacos|burritos|bowls|plates|sides|desserts?|sweets|drinks|beverages|cocktails|beer|wine|breakfast|brunch|lunch|dinner|kids|specials|combos?|wraps|subs|noodles|sushi|rolls|curries|happy hour|coffee|tea|smoothies|shakes|milkshakes|wings|seafood|steaks?|chicken|vegan|vegetarian|sweets|bakery|pastries)\b/i;
+
+/** How many distinct menu-section headings a page's text carries: short lines made of a section word and little else. */
+export function sectionCount(text: string): number {
+  const found = new Set<string>();
+  for (const line of text.split("\n")) {
+    if (line.length > 32 || line.split(" ").length > 4 || /[.$:?!]/.test(line)) continue;
+    const m = SECTION_WORDS.exec(line);
+    if (m) found.add(m[1]!.toLowerCase());
+  }
+  return found.size;
+}
+
+/** How much a page looks like the menu: its prices, its section headings, and a menu-ish address. Three or more is a menu. */
+export function menuScore(text: string, url = ""): number {
+  const prices = (text.match(/\$\s?\d/g) ?? []).length;
+  const sections = sectionCount(text);
+  const path = (() => {
+    try {
+      return new URL(url).pathname;
+    } catch {
+      return "";
+    }
+  })();
+  return Math.min(prices, 40) + 3 * sections + (/\/(our-|the-|full-)?(menus?|food|eats)(\/|$|\.)/i.test(path) ? 8 : 0);
+}
+
+/**
+ * Drops lines that are furniture: ones named as such, and, when three or more
+ * pages were read, ones the site repeats on every one of them (a menu that two
+ * location pages share is kept; the social links on all five are not).
+ */
+export function stripFurniture(pages: string[]): string[] {
+  const counts = new Map<string, number>();
+  for (const page of pages) for (const line of new Set(page.split("\n"))) counts.set(line, (counts.get(line) ?? 0) + 1);
+  return pages.map((page) =>
+    page
+      .split("\n")
+      .filter((line) => !FURNITURE.test(line) && (pages.length < 3 || (counts.get(line) ?? 0) < pages.length))
+      .join("\n"),
+  );
 }
 
 /** Lines that look like a menu: a price, or a short dish-like line near one. */
@@ -207,12 +258,23 @@ export function jsonLdMenu(html: string): SiteMenuItem[] {
   return items.slice(0, 300);
 }
 
-/** Links on a page that lead to its menu, on the same site, and menus offered as PDFs. */
+/** One spelling for a page, so "/delivery" and "/delivery/" are read once. */
+const pageKey = (url: URL) => {
+  url.hash = "";
+  return url.href.replace(/\/+$/, "").replace(/\/+(\?)/, "$1") || url.href;
+};
+
+/**
+ * Which links on a page are likely to lead to its menu, on the same site, best
+ * first: "Menu" itself, then food words, then ordering pages and the pages for
+ * single locations (some sites print the menu only there). And menus offered as PDFs.
+ */
 export function menuLinks(html: string, base: string): { pages: string[]; pdfs: string[] } {
   const origin = hostOf(base);
-  const pages: string[] = [];
+  const ranked: { url: string; tier: number; order: number }[] = [];
   const pdfs: string[] = [];
   const seen = new Set<string>();
+  const self = pageKey(new URL(base));
   for (const m of html.matchAll(/<a\b[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi)) {
     const href = decodeEntities(m[1]!);
     const label = pageText(m[2]!).replace(/\n/g, " ");
@@ -223,19 +285,24 @@ export function menuLinks(html: string, base: string): { pages: string[]; pdfs: 
     } catch {
       continue;
     }
-    url.hash = "";
-    const key = url.href;
-    if (seen.has(key) || hostOf(key) !== origin) continue;
+    const key = pageKey(url);
+    if (seen.has(key) || key === self || hostOf(key) !== origin) continue;
     const hint = `${label} ${url.pathname}`;
-    if (/\.pdf(\?|$)/i.test(url.pathname) && /menu|food|drink|brunch|lunch|dinner|breakfast|dessert|wine|cocktail/i.test(hint)) {
-      seen.add(key);
-      pdfs.push(key);
-    } else if (/\bmenus?\b|\bfood\b|\beat\b|\bdishes\b|\bbrunch\b|\blunch\b|\bdinner\b|\bbreakfast\b|\bdessert\b|\bdrinks?\b|\border\b/i.test(hint) && !/\.(jpe?g|png|gif|webp|svg|zip|docx?)(\?|$)/i.test(url.pathname)) {
-      seen.add(key);
-      pages.push(key);
+    if (/\.pdf(\?|$)/i.test(url.pathname)) {
+      if (/menu|food|drink|brunch|lunch|dinner|breakfast|dessert|wine|cocktail/i.test(hint)) {
+        seen.add(key);
+        pdfs.push(key);
+      }
+      continue;
     }
+    if (/\.(jpe?g|png|gif|webp|svg|zip|docx?|xml|json|css|js)(\?|$)/i.test(url.pathname) || /\/(wp-json|feed|cart|checkout|shop|product|tag|category|author|page)\b/i.test(url.pathname)) continue;
+    const tier = /\bmenus?\b/i.test(hint) ? 1 : /\bfood\b|\beat\b|\bdishes\b|\bbrunch\b|\blunch\b|\bdinner\b|\bbreakfast\b|\bdessert\b|\bdrinks?\b/i.test(hint) ? 2 : /\border\b|\bdelivery\b|\btakeout\b|\bpickup\b|\/locations?\/[^/]+/i.test(hint) ? 3 : 0;
+    if (!tier) continue;
+    seen.add(key);
+    ranked.push({ url: key, tier, order: ranked.length });
   }
-  return { pages: pages.slice(0, MAX_PAGES - 1), pdfs: pdfs.slice(0, 5) };
+  ranked.sort((a, b) => a.tier - b.tier || a.order - b.order);
+  return { pages: ranked.slice(0, MAX_PAGES - 1).map((r) => r.url), pdfs: pdfs.slice(0, 5) };
 }
 
 /** Reads the restaurant's menu from its own site. Null when the site isn't one Wally may read, or nothing menu-like came back. */
@@ -254,17 +321,19 @@ export async function readSiteMenu(website: string): Promise<SiteMenu | null> {
   const more = await Promise.all(links.pages.filter(allowed).map((url) => fetchText(url, "text/html,application/xhtml+xml")));
   const pages = more.filter((p): p is NonNullable<typeof p> => Boolean(p) && p!.status < 400 && /html/i.test(p!.type));
   for (const p of pages) for (const item of jsonLdMenu(p.body)) if (!items.some((i) => i.name === item.name && i.section === item.section)) items.push(item);
-  // The page with the most prices on it is the menu; the home page comes last.
-  const scored = [...pages.map((p) => ({ url: p.url, text: menuish(pageText(p.body)) })), { url: home.url, text: menuish(homeText) }]
-    .map((p) => ({ ...p, prices: (p.text.match(/\$\s?\d/g) ?? []).length }))
-    .sort((a, b) => b.prices - a.prices);
+  // The page that looks most like the menu (prices, section headings, its address) comes first; the home page, with its merchandise and news, is one of the pack.
+  const read = [...pages.map((p) => ({ url: p.url, text: pageText(p.body) })), { url: home.url, text: homeText }];
+  const texts = stripFurniture(read.map((p) => p.text));
+  const scored = read
+    .map((p, i) => ({ url: p.url, text: menuish(texts[i]!), score: menuScore(texts[i]!, p.url) }))
+    .sort((a, b) => b.score - a.score);
   let text = "";
   for (const p of scored) {
     if (text.length >= MAX_TEXT) break;
     text += `${text ? "\n\n" : ""}[${p.url}]\n${p.text}`.slice(0, MAX_TEXT - text.length);
   }
   const pdfs = [...links.pdfs, ...pages.flatMap((p) => menuLinks(p.body, p.url).pdfs)].filter((u, i, all) => all.indexOf(u) === i).slice(0, 5);
-  // Nothing menu-like at all: no structured items, no menu page, no PDF, and hardly a price on the home page.
-  if (!items.length && !pages.length && !pdfs.length && scored[0]!.prices < 3) return null;
-  return { source: scored[0]?.prices ? scored[0].url : home.url, items, text, pdfs, pages: 1 + pages.length };
+  // Nothing menu-like at all: no structured items, no PDF, and no page with prices or section headings on it.
+  if (!items.length && !pdfs.length && scored[0]!.score < 3) return null;
+  return { source: scored[0]!.url, items, text, pdfs, pages: 1 + pages.length };
 }

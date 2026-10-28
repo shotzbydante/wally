@@ -26,6 +26,8 @@ export interface Place {
   name: string;
   /** Short street address. */
   address: string;
+  /** The 5-digit ZIP in its full address, when Google gave one. Used to tell where "near me" is; never shown or stored. */
+  zip?: string;
   /** What kind of place, in Google's words: "Ice cream shop". */
   kind: string;
   /** Google's one-line description of the place and what it is known for, when it has one. */
@@ -149,20 +151,42 @@ const httpsUrl = (value: string | undefined): string | null => {
   }
 };
 
-/** The 5-digit ZIP a point sits in, by Google's Geocoding API; nothing stored. Undefined if Google can't say or doesn't answer in time. */
+/** The 5-digit ZIP in an address, when it has one ("1535 W Madison St, Chicago, IL 60607" → 60607). */
+export function zipIn(address: string | null | undefined): string | undefined {
+  return /\b(\d{5})(?:-\d{4})?\b(?!.*\b\d{5}\b)/.exec(address ?? "")?.[1];
+}
+
+/**
+ * The 5-digit ZIP a point sits in; nothing stored. First by Google's Geocoding
+ * API, and when that can't say (the key may not be allowed that API, which it
+ * reports as a status, not an error), by the addresses of the places nearest
+ * the point in a Places search at the cheapest tier that carries an address.
+ * Undefined if neither can say or answers in time.
+ */
 export async function zipAt(point: Point): Promise<string | undefined> {
   const key = process.env.GOOGLE_MAPS_API_KEY?.trim();
   if (!key) return undefined;
   const q = new URLSearchParams({ latlng: `${point.lat},${point.lng}`, result_type: "postal_code", key });
   try {
     const res = await fetch(`https://maps.googleapis.com/maps/api/geocode/json?${q}`, { cache: "no-store", signal: AbortSignal.timeout(5000) });
-    if (!res.ok) return undefined;
-    const data = (await res.json()) as { results?: { address_components?: { types?: string[]; short_name?: string }[] }[] };
+    const data = res.ok ? ((await res.json()) as { status?: string; error_message?: string; results?: { address_components?: { types?: string[]; short_name?: string }[] }[] }) : { status: String(res.status) };
     for (const r of data.results ?? []) for (const c of r.address_components ?? []) if (c.types?.includes("postal_code") && /^\d{5}$/.test(c.short_name ?? "")) return c.short_name;
+    if (data.status !== "OK") console.error(`[places] geocode: ${data.status} ${(data.error_message ?? "").slice(0, 200)}`);
   } catch (error) {
     console.error("[places] geocode: no response", error instanceof Error ? error.name : "");
   }
-  return undefined;
+  return zipNear(point).catch(() => undefined);
+}
+
+/** The ZIP most of the nearest places share, by one Places search held to a mile around the point. */
+async function zipNear(point: Point): Promise<string | undefined> {
+  const { places } = await searchText({ textQuery: "restaurant", pageSize: 5, locationRestriction: boxAround(point, 1) }, ["formattedAddress"]);
+  const counts = new Map<string, number>();
+  for (const p of places) {
+    const zip = zipIn(p.formattedAddress);
+    if (zip) counts.set(zip, (counts.get(zip) ?? 0) + 1);
+  }
+  return [...counts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0];
 }
 
 /** Turns a typed address into Google's spelling of it and its coordinates. Null if Google can't place it. */
@@ -282,6 +306,8 @@ export interface PlaceSearch {
   query: string;
   /** Search only around here. */
   near?: Point | null;
+  /** Lean toward here without being held to it: for a place named by name, which may be in another city altogether. Ignored when `near`, `area` or `anchor` is given. */
+  bias?: Point | null;
   /** A neighbourhood, city or ZIP the person named, searched instead of `near`. Used as words when there is no `anchor` for it. */
   area?: string;
   /** Where `area` is, when it has been looked up: the search is then held to a box around it instead of leaning on the words. */
@@ -311,7 +337,13 @@ export async function searchPlaces(search: PlaceSearch): Promise<Place[]> {
       textQuery: area && !anchor ? `${query} near ${area}` : query,
       pageSize: search.limit ?? PAGE_SIZE,
       ...(search.openNow ? { openNow: true } : {}),
-      ...(anchor ? { locationRestriction: boxAround(anchor.point, anchor.wide ? AROUND_CITY_MILES : AROUND_SPOT_MILES) } : !area && search.near ? { locationRestriction: boxAround(search.near) } : {}),
+      ...(anchor
+        ? { locationRestriction: boxAround(anchor.point, anchor.wide ? AROUND_CITY_MILES : AROUND_SPOT_MILES) }
+        : !area && search.near
+          ? { locationRestriction: boxAround(search.near) }
+          : !area && search.bias
+            ? { locationBias: { circle: { center: { latitude: search.bias.lat, longitude: search.bias.lng }, radius: 50000 } } }
+            : {}),
       ...(travel ? { routingParameters: { origin: { latitude: travel.from.lat, longitude: travel.from.lng }, travelMode: travel.mode } } : {}),
     },
     SEARCH_FIELDS,
@@ -324,6 +356,7 @@ export async function searchPlaces(search: PlaceSearch): Promise<Place[]> {
       id: p.id!,
       name: p.displayName!.text!.trim(),
       address: p.shortFormattedAddress ?? p.formattedAddress ?? "",
+      ...(zipIn(p.formattedAddress) ? { zip: zipIn(p.formattedAddress) } : {}),
       kind: p.primaryTypeDisplayName?.text ?? "",
       summary: p.editorialSummary?.text?.trim().slice(0, 240) || null,
       point: pointOf(p),

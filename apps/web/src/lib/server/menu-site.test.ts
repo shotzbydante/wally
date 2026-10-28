@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { USER_AGENT, decodeEntities, jsonLdMenu, menuLinks, menuish, pageText, readSiteMenu, readableSite, robotsAllow } from "./menu-site";
+import { USER_AGENT, decodeEntities, jsonLdMenu, menuLinks, menuScore, menuish, pageText, readSiteMenu, readableSite, robotsAllow, sectionCount, stripFurniture } from "./menu-site";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -60,6 +60,29 @@ describe("reading a page", () => {
     expect(links.pages).toEqual(["https://ginos.example/menu"]);
     expect(links.pdfs).toEqual(["https://ginos.example/files/dinner-menu.pdf"]);
   });
+  it("ranks the links: Menu first, food words next, ordering and single-location pages last, each page once", () => {
+    const page = `<a href="/locations/">Locations</a><a href="/locations/madison/">Madison</a><a href="/delivery">Order &amp; Delivery</a><a href="/delivery/">Delivery</a>
+      <a href="/drinks">Drinks</a><a href="/our-menu/">Our Menu</a><a href="/shop">Shop</a><a href="/product/tee">Tee</a><a href="/">Home</a><a href="/escaped#menu">Top</a>`;
+    expect(menuLinks(page, "https://goat.example/").pages).toEqual(["https://goat.example/our-menu", "https://goat.example/drinks", "https://goat.example/locations/madison", "https://goat.example/delivery"]);
+  });
+  it("knows a menu by its section headings when it prints no prices, and tells it from a merchandise page", () => {
+    const madison = "Billy Goat on Madison\nHours\nBreakfast Plates\nSteak & Eggs\nFamous Burgers\nCheezborger\nHot Sandwiches\nItalian Beef\nSides\nFries\nDrinks\nCoffee or Tea";
+    expect(sectionCount(madison)).toBeGreaterThanOrEqual(5);
+    expect(menuScore(madison, "https://goat.example/locations/madison/")).toBeGreaterThan(menuScore("Official merchandise\nT-Shirt\n$19.95\nOrnament\n$15.99\nBeer Glass\n$12.95", "https://goat.example/"));
+    expect(menuScore("Welcome to our law office.", "https://law.example/")).toBe(0);
+    expect(menuScore("Fries $4", "https://x.example/menu/")).toBeGreaterThanOrEqual(8);
+  });
+  it("drops furniture: social and cart lines, and lines every one of three pages repeats, but keeps a menu two pages share", () => {
+    const menu = "Burgers\nCheezborger\nFries";
+    const [a, b, c] = stripFurniture([`Facebook\nAPPLY FOR A JOB\n0 Items\nWelcome\n${menu}`, `Facebook\nAPPLY FOR A JOB\n0 Items\nHours\n${menu}`, "Facebook\nAPPLY FOR A JOB\n0 Items\nOur story"]);
+    expect(a).toBe(`Welcome\n${menu}`);
+    expect(b).toBe(`Hours\n${menu}`);
+    expect(c).toBe("Our story");
+    expect(stripFurniture(["Instagram\nFries $4", "Instagram\nFries $4"])).toEqual(["Fries $4", "Fries $4"]);
+  });
+  it("treats markup a page shows escaped as markup", () => {
+    expect(pageText("<p>&lt;h2&gt;Food&lt;/h2&gt; &lt;p&gt;Fries&lt;/p&gt;</p>")).toBe("Food Fries");
+  });
   it("reads the menu a site publishes as structured data", () => {
     const ld = `<script type="application/ld+json">${JSON.stringify({
       "@context": "https://schema.org",
@@ -109,6 +132,20 @@ describe("reading a page", () => {
     expect(calls).toEqual(["https://ginos.example/robots.txt"]);
     expect(await readSiteMenu("https://www.doordash.com/store/ginos")).toBeNull();
     expect(calls).toHaveLength(1);
+  });
+  it("finds a priceless menu on a location page, past the home page's merchandise", async () => {
+    const furniture = "<p>Facebook</p><p>APPLY FOR A JOB</p>";
+    const pages: Record<string, string> = {
+      "https://goat.example/": `<html><body>${furniture}<a href="/delivery/">Order &amp; Delivery</a><a href="/locations/madison/">Madison</a><a href="/locations/pier/">Pier</a><h2>Merch</h2><p>T-Shirt $19.95</p><p>Ornament $15.99</p><p>Glass $12.95</p></body></html>`,
+      "https://goat.example/delivery": `<html><body>${furniture}<p>Order through our partners.</p></body></html>`,
+      "https://goat.example/locations/madison": `<html><body>${furniture}<h2>Famous Burgers</h2><p>Cheezborger</p><p>Double Cheezborger</p><h2>Hot Sandwiches</h2><p>Italian Beef</p><h2>Sides</h2><p>Fries</p><h2>Drinks</h2><p>Coffee</p></body></html>`,
+      "https://goat.example/locations/pier": `<html><body>${furniture}<p>Seats 50.</p></body></html>`,
+    };
+    vi.stubGlobal("fetch", async (url: string) => new Response(pages[url] ?? "", { status: pages[url] ? 200 : 404, headers: { "content-type": url.endsWith("robots.txt") ? "text/plain" : "text/html" } }));
+    const menu = await readSiteMenu("https://goat.example/");
+    expect(menu).toMatchObject({ source: "https://goat.example/locations/madison", pages: 4 });
+    expect(menu!.text.startsWith("[https://goat.example/locations/madison]\nFamous Burgers\nCheezborger")).toBe(true);
+    expect(menu!.text).not.toContain("Facebook");
   });
   it("is null when the site has nothing menu-like", async () => {
     vi.stubGlobal("fetch", async (url: string) => new Response(url.endsWith("robots.txt") ? "" : "<html><body><p>Welcome to our law office.</p></body></html>", { status: 200, headers: { "content-type": url.endsWith("robots.txt") ? "text/plain" : "text/html" } }));
