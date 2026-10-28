@@ -52,6 +52,4 @@ export function sameStore(place: { name: string; address: string }, venue: Pick<
 }
 
 /** The ZIP in a saved address, if it has one. */
-export function zipOf(address: string | null | undefined): string | undefined {
-  return /\b(\d{5})(?:-\d{4})?\b(?!.*\b\d{5}\b)/.exec(address ?? "")?.[1];
-}
+export { zipIn as zipOf } from "./places";

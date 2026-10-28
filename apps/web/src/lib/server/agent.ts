@@ -66,7 +66,8 @@ const FINDING_WITH_PLACES = `# Finding places
 - You can't look up a restaurant's booking rules. For its menu, see "Menus".`;
 
 const MENUS = `# Menus
-- When someone asks what a place serves, about a dish, what's in it, sizes, calories, prices, or wants to "tee up" or order something somewhere you can't build the order, call read_menu with the restaurant's name as it appears on a card or as they said it, and what they're asking about in looking_for. It reads the restaurant's own website (never a delivery app), or, for the big chains, the menu Wally keeps. Then answer from what it returns, in your own words, and name the source in passing ("from their site", "on McDonald's menu").
+- When someone asks what a place serves, about a dish, what's in it, sizes, calories, prices, or wants to "tee up" or order something somewhere you can't build the order, call read_menu with the restaurant's name as it appears on a card or as they said it, and what they're asking about in looking_for. It reads the restaurant's own website (never a delivery app), or, for the big chains, the menu Wally keeps. A place that isn't on any card is looked up by its name, wherever it is, so call read_menu straight away rather than searching for the place first. Then answer from what it returns, in your own words, and name the source in passing ("from their site", "on McDonald's menu").
+- Menu answers are the one place you lay things out as a list. Open with one short line, then put each item on its own line starting with "• " (a bullet, a space): the item's name, then a dash and a few words on what it is, with the price when read_menu gave one and calories for a chain. Up to eight items for a question about one kind of thing; up to twenty when they ask for the whole menu. Then, if anything's worth saying, one closing line. These answers may run to 120 words; keep each line short, since it is read on a phone. No other markdown: no asterisks, headings or links in the lines.
 - Say only what read_menu returned. A price from a site can be out of date, and a chain's prices vary by location: say so in a few words when you quote one, and never quote a price read_menu didn't give. Calories are the chain's own published figures.
 - When read_menu says the site can't be read (it's a PDF, an ordering platform's page, or nothing menu-like), say so plainly and point to the Website link on the card, or the PDF it names.
 - When the person names a well-known national chain, call read_menu before find_menu; it says whether Wally can build orders there. For one that doesn't take orders through Wally, never ask for a ZIP: describe what they asked for from the menu, say that ordering is through the chain's own app or the delivery apps on its card, and offer to find the nearest one that's open now. That is the whole answer; no apology.`;
@@ -83,7 +84,7 @@ const FINDING_WITH_WEB = `# Finding places
 const ORDERING = `# Ordering (restaurants that take orders through Square)
 - You can build a pickup order at some restaurants and hand the person a page to pay on. The person pays the restaurant directly; you never take payment.
 - find_orderable_places lists the nearest restaurants where you can build a pickup order, with no cuisine filter; show all of its ids with show_places. For a cuisine, use find_places instead and read can_order.
-- Never ask for a ZIP when they have a saved address or are sharing their location: ordering works from it on its own. Ask for a ZIP only if a tool result tells you to.
+- The location set on the page (their saved address, or the current location they are sharing) is where "near me" is, wherever they live or whatever ZIP their account holds: someone traveling is served where they are. Never ask for a ZIP when a location is set: ordering works from it on its own. Ask for one only if a tool result tells you to, and never answer a request with a question about ZIPs otherwise.
 - When someone says "Order from <place>" without a dish, ask in one short line what they'd like there; you have no menu until find_menu runs with a dish.
 - When someone wants to order something, call find_menu with the restaurant's name and the dish in their words. It tells you whether the place takes orders this way, and lists matching menu items with their prices and the choices each one needs (a base, a protein, a size).
 - If the place doesn't take orders this way, say so in one line and point them to its own site or the delivery apps on its card. Never pretend to order anywhere else.
@@ -107,13 +108,13 @@ const houseRules = (hasPlaces: boolean, canOrder: boolean) => `You are Wally the
 # How you talk
 This matters as much as what you say. A good waiter is brief.
 - Keep every message under 45 words. Usually one or two sentences. Count before you send.
-- The only exception: when the person explicitly asks for a recipe, steps or a full plan, you may use up to 110 words, as short plain lines.
+- The exceptions: when the person explicitly asks for a recipe, steps or a full plan, you may use up to 110 words, as short plain lines; and a menu answer (see "Menus") lists items as bullet lines, up to 120 words.
 - Answer what was asked and stop. Don't volunteer recipes, instructions, background or extra tips. Offer them in a few words ("Want the method?") and let the person ask.
 - One idea per message. At most one question, and only when the answer changes what you'd suggest.
 - At most one flourish per message, and none when plain is clearer. No emoji in your sentences.
 - Use the person's name rarely: a greeting, or a moment that earns it. Never in back-to-back messages.
 - Say a caveat once. If you've already said in this conversation that you can't confirm hours or can't book, don't repeat it unless it matters again.
-- American English. Plain text only: no markdown, asterisks, headings, bullet symbols or links typed into your sentences. The same words must read well in a text message.
+- American English. Plain text only: no markdown, asterisks, headings or links typed into your sentences, and no bullets except the "• " lines of a menu answer. The same words must read well in a text message.
 - When something has gone wrong, or money, allergies or safety come up, drop the theatre and be neutral and exact.
 
 # What you can do today
@@ -262,7 +263,7 @@ const MAX_ORDERABLE = 8;
 const READ_MENU_TOOL: Anthropic.Tool = {
   name: "read_menu",
   description:
-    "Reads a restaurant's menu: for the big chains, the menu Wally keeps (items, what's in them, calories, sizes, breakfast hours, how ordering works there); for anyone else, the restaurant's own website, as structured menu data when the site publishes it or its menu text otherwise. Use it to answer what a place serves, what's in a dish, calories or prices, and before find_menu when the place is a national chain. Never a delivery app's page.",
+    "Reads a restaurant's menu: for the big chains, the menu Wally keeps (items, what's in them, calories, sizes, breakfast hours, how ordering works there); for anyone else, the restaurant's own website, as structured menu data when the site publishes it or its menu text otherwise. Use it to answer what a place serves, what's in a dish, calories or prices, and before find_menu when the place is a national chain. The place needn't be on a card: one named by name is looked up, wherever it is. Never a delivery app's page.",
   input_schema: {
     type: "object",
     properties: {
@@ -643,13 +644,24 @@ export async function reply(thread: ChatMessage[], guest: Guest, channel: Channe
   let ticketed = false;
   /** The venues that take orders near the person, looked up once per turn and only when a search needs them. */
   let orderable: Promise<Venue[]> | null = null;
-  /** The ZIP ordering works from: the saved address's, else the one under a shared location, else the account's, else one Claude was told. */
+  /**
+   * The ZIP ordering works from. The location set on the account is the source
+   * of truth: the saved address's ZIP, or the ZIP under a shared current
+   * location (from the places this turn's search found around it, else looked
+   * up). Only with no location at all does the account's own ZIP, or one Claude
+   * was told, stand in: someone traveling isn't asked for a ZIP, and their home
+   * ZIP is never used in its place.
+   */
   let zipFound: Promise<string | undefined> | null = null;
   const orderingZip = (told?: unknown) => {
     zipFound ??= (async () => {
       const own = zipOf(guest.address);
       if (own) return own;
-      if (guest.address === CURRENT_LOCATION && guest.near) return (await zipAt(guest.near).catch(() => undefined)) ?? guest.zip;
+      if (guest.near) {
+        const around = [...found.values()].filter((p) => !p.from && p.zip && p.miles !== undefined && p.miles <= 3).map((p) => p.zip!);
+        const nearest = around.sort((a, b) => around.filter((z) => z === b).length - around.filter((z) => z === a).length)[0];
+        return nearest ?? (await zipAt(guest.near).catch(() => undefined));
+      }
       return guest.zip;
     })();
     return zipFound.then((z) => z ?? (/^\d{5}$/.test(clip(told, 5)) ? clip(told, 5) : undefined));
@@ -751,7 +763,22 @@ export async function reply(thread: ChatMessage[], guest: Guest, channel: Channe
     }
   };
 
-  /** Runs one read_menu call: a kept chain menu, or the restaurant's own site, found by name among the places on cards. */
+  /**
+   * A restaurant someone named that no card holds, by one Places search for
+   * the name, leaning toward where they are. It joins this turn's results, so
+   * show_places could draw its card. Null when nothing by that name turns up.
+   */
+  const lookUpByName = async (name: string): Promise<FoundPlace | null> => {
+    const places = await searchPlaces({ query: name, bias: guest.near, limit: 3, travel: guest.near ? { from: guest.near, mode: "DRIVE" } : null }).catch(() => [] as Place[]);
+    const place = places.find((p) => nameMatches(name, p.name) || nameMatches(p.name, name)) ?? places[0];
+    if (!place) return null;
+    const id = `p${found.size + 1}`;
+    const hit: FoundPlace = { ...place, ...(guest.near && place.point ? { miles: milesBetween(guest.near, place.point) } : {}), ...(shown.has(place.id) ? { shown: true } : {}) };
+    found.set(id, hit);
+    return hit;
+  };
+
+  /** Runs one read_menu call: a kept chain menu, or the restaurant's own site, found by name among the places on cards, or looked up by name. */
   const readMenu = async (input: unknown): Promise<{ content: string; is_error?: boolean }> => {
     const args = (input ?? {}) as { restaurant?: unknown; looking_for?: unknown; website?: unknown };
     const name = clip(args.restaurant, 80);
@@ -768,12 +795,14 @@ export async function reply(thread: ChatMessage[], guest: Guest, channel: Channe
         }),
       };
     }
-    // The site: this turn's search results first, then earlier cards, then one the person gave.
+    // The site: this turn's search results first, then earlier cards, then one the person gave, then the place's own listing, looked up by name (leaning toward where they are, but not held to it: the place they name may be in another city).
     const fromSearch = [...found.values()].find((p) => nameMatches(name, p.name) || nameMatches(p.name, name));
     const fromCards = shownSites(thread).find((p) => nameMatches(name, p.name) || nameMatches(p.name, name));
-    const website = fromSearch?.website ?? fromCards?.website ?? (typeof args.website === "string" ? args.website.trim() : undefined);
-    const known = fromSearch?.name ?? fromCards?.name ?? name;
-    if (!website) return { content: JSON.stringify({ restaurant: known, readable: false, note: fromSearch || fromCards ? "This place lists no website, so its menu can't be read. Point to the delivery app chips on its card." : "No site is known for that place. Call find_places for it first, so it has a card, or ask the person for its website." }) };
+    const given = typeof args.website === "string" && readableSite(args.website.trim()) ? args.website.trim() : undefined;
+    const fromListing = !fromSearch && !fromCards && !given && placesConfigured() ? await lookUpByName(name) : null;
+    const website = fromSearch?.website ?? fromCards?.website ?? given ?? fromListing?.website ?? (typeof args.website === "string" ? args.website.trim() : undefined);
+    const known = fromSearch?.name ?? fromCards?.name ?? fromListing?.name ?? name;
+    if (!website) return { content: JSON.stringify({ restaurant: known, readable: false, note: fromSearch || fromCards || fromListing ? "This place lists no website, so its menu can't be read. Point to the delivery app chips on its card, or offer to find it with find_places." : "No listing was found for that name. Ask the person, in one short line, where it is or for its website." }) };
     if (!readableSite(website)) return { content: JSON.stringify({ restaurant: known, readable: false, website, note: "Its listed site is an ordering platform or marketplace page, which Wally doesn't read. Point the person to the Website link on its card for the menu." }) };
     const menu = await readSiteMenu(website);
     if (!menu) return { content: JSON.stringify({ restaurant: known, readable: false, website, note: "Nothing menu-like could be read from the site. Point the person to the Website link on its card." }) };
@@ -800,7 +829,14 @@ export async function reply(thread: ChatMessage[], guest: Guest, channel: Channe
     const dish = clip(args.dish, 80);
     const zip = await orderingZip(args.zip);
     if (!restaurant || !dish) return { content: "Give the restaurant and the dish.", is_error: true };
-    if (!zip) return { content: "You need a 5-digit ZIP to find restaurants that take orders. Ask the person for theirs in one short line.", is_error: true };
+    if (!zip) {
+      return {
+        content: guest.near
+          ? "Their location couldn't be placed just now, so the restaurants that take orders near them can't be looked up. Tell the person plainly that ordering isn't working at the moment, and point them to the restaurant's own site or the delivery apps on its card. Don't ask for a ZIP."
+          : "No location is set, so there is nowhere to look for restaurants that take orders. Ask the person, in one short line, to set their location in the bar at the top of the page, or (by text) for their ZIP.",
+        is_error: true,
+      };
+    }
     if (!ordering) return { content: "Ordering isn't switched on.", is_error: true };
     try {
       // The same store list a place search fetched this turn, so it isn't billed twice.

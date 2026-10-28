@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cityOf, deliveryLinks } from "@/lib/chat";
 import { describePlaces, placeChoices, placesIntro, shownPlaces, type FoundPlace } from "./agent";
-import { findAddress, findAnchor, milesBetween, searchPlaces, suggestAddresses } from "./places";
+import { findAddress, findAnchor, milesBetween, searchPlaces, suggestAddresses, zipAt, zipIn } from "./places";
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -96,6 +96,47 @@ describe("searchPlaces", () => {
   it("throws when Google refuses", async () => {
     google([], 403);
     await expect(searchPlaces({ query: "dessert" })).rejects.toThrow("403");
+  });
+  it("leans toward the person for a place named by name, without being held there, and keeps the ZIP of its full address", async () => {
+    const calls = google([{ id: "irv", displayName: { text: "Irv's Burgers" }, formattedAddress: "7998 Santa Monica Blvd, West Hollywood, CA 90046, USA" }]);
+    const [place] = await searchPlaces({ query: "Irv's Burgers", bias: { lat: 41.88, lng: -87.63 }, limit: 3 });
+    expect(place).toMatchObject({ name: "Irv's Burgers", zip: "90046" });
+    expect(calls[0]!.body).toMatchObject({ textQuery: "Irv's Burgers", pageSize: 3, locationBias: { circle: { center: { latitude: 41.88, longitude: -87.63 } } } });
+    expect(calls[0]!.body.locationRestriction).toBeUndefined();
+  });
+});
+
+describe("the ZIP under a point", () => {
+  it("reads it from an address", () => {
+    expect(zipIn("1535 W Madison St, Chicago, IL 60607, USA")).toBe("60607");
+    expect(zipIn("Chicago, IL 60607-1234")).toBe("60607");
+    expect(zipIn("Chicago, IL")).toBeUndefined();
+  });
+  it("asks the Geocoding API first, and the nearest places when that can't answer", async () => {
+    vi.stubEnv("GOOGLE_MAPS_API_KEY", "key");
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    const urls: string[] = [];
+    vi.stubGlobal("fetch", async (url: string, init?: RequestInit) => {
+      urls.push(url);
+      if (url.includes("geocode")) return new Response(JSON.stringify({ status: "REQUEST_DENIED", error_message: "This API project is not authorized to use this API." }), { status: 200 });
+      const body = JSON.parse(init!.body as string) as { textQuery: string; locationRestriction: unknown };
+      expect(body.textQuery).toBe("restaurant");
+      expect(body.locationRestriction).toBeDefined();
+      return new Response(JSON.stringify({ places: [{ formattedAddress: "1 W Madison St, Chicago, IL 60602" }, { formattedAddress: "5 N State St, Chicago, IL 60602" }, { formattedAddress: "2 E Lake St, Chicago, IL 60601" }] }), { status: 200 });
+    });
+    expect(await zipAt({ lat: 41.88, lng: -87.63 })).toBe("60602");
+    expect(urls[0]).toContain("geocode");
+    expect(errors).toHaveBeenCalledWith(expect.stringContaining("REQUEST_DENIED"));
+  });
+  it("takes the Geocoding API's answer when it has one", async () => {
+    vi.stubEnv("GOOGLE_MAPS_API_KEY", "key");
+    const urls: string[] = [];
+    vi.stubGlobal("fetch", async (url: string) => {
+      urls.push(url);
+      return new Response(JSON.stringify({ status: "OK", results: [{ address_components: [{ types: ["postal_code"], short_name: "60607" }] }] }), { status: 200 });
+    });
+    expect(await zipAt({ lat: 41.88, lng: -87.63 })).toBe("60607");
+    expect(urls).toHaveLength(1);
   });
 });
 
