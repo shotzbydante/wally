@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cityOf, deliveryLinks } from "@/lib/chat";
+import { cityOf, deliveryLinks, textDeliveryLinks } from "@/lib/chat";
 import { describePlaces, placeChoices, placesIntro, shownPlaces, type FoundPlace } from "./agent";
 import { findAddress, findAnchor, milesBetween, searchPlaces, suggestAddresses, zipAt, zipIn } from "./places";
 
@@ -278,8 +278,17 @@ describe("place cards", () => {
 describe("deliveryLinks", () => {
   it("opens a search for the restaurant in each app", () => {
     expect(deliveryLinks("Joe's Pizza & Pasta")).toEqual([
-      { app: "DoorDash", url: "https://www.doordash.com/search/store/Joe's%20Pizza%20%26%20Pasta/" },
-      { app: "Uber Eats", url: "https://www.ubereats.com/search?q=Joe's%20Pizza%20%26%20Pasta" },
+      { app: "DoorDash", url: "https://www.doordash.com/search/store/Joe's%20Pizza%20%26%20Pasta/", own: false },
+      { app: "Uber Eats", url: "https://www.ubereats.com/search?q=Joe's%20Pizza%20%26%20Pasta", own: false },
+    ]);
+  });
+  it("uses the store's own page when a web search found it, on the web and in a text", () => {
+    const apps = { doordash: "https://www.doordash.com/store/kaido-sushi-chicago-24623377/" };
+    expect(deliveryLinks("Kai Sushi", "https://kaisushijapanese.com/", apps)[0]).toEqual({ app: "DoorDash", url: apps.doordash, own: true });
+    expect(deliveryLinks("Kai Sushi", "https://kaisushijapanese.com/", apps)[1]!.url).toContain("ubereats.com/search");
+    expect(textDeliveryLinks("Kai Sushi", "https://wallywaiter.com", apps)).toEqual([
+      { app: "DoorDash", url: "doordash.com/store/kaido-sushi-chicago-24623377" },
+      { app: "Uber Eats", url: "wallywaiter.com/go/ubereats/kai-sushi" },
     ]);
   });
   it("uses the listing's own page on an app when its website is that page", () => {
