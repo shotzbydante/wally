@@ -157,7 +157,7 @@ describe("asTexts", () => {
   it("sends his words and the cards as separate texts, a small card per place", () => {
     expect(asTexts({ content: "Insomnia is my pick.", choices: [cookies, closed] }, "https://wallywaiter.com")).toEqual([
       "Insomnia is my pick.",
-      "1. 🍪 Insomnia Cookies\nOpen now · 2.8 mi · ★ 4.5 · $\nOpen late, warm cookies\ninsomniacookies.com\nMap: wallywaiter.com/m/1\n\n2. 🥛 DeLuscious\nClosed · 1.1 mi\nDoorDash: wallywaiter.com/go/doordash/deluscious\nUber Eats: wallywaiter.com/go/ubereats/deluscious\nMap: wallywaiter.com/m/2\n\nWant to see places that aren't open right now too? Just say so.\nFast food or a drive-thru? Just say so.\nVisit Wally for more options: wallywaiter.com/ask",
+      "1. 🍪 Insomnia Cookies\nOpen now · 2.8 mi · ★ 4.5 · $\nOpen late, warm cookies\ninsomniacookies.com\nDoorDash: wallywaiter.com/go/doordash/insomnia-cookies\nUber Eats: wallywaiter.com/go/ubereats/insomnia-cookies\nMap: wallywaiter.com/m/1\n\n2. 🥛 DeLuscious\nClosed · 1.1 mi\nDoorDash: wallywaiter.com/go/doordash/deluscious\nUber Eats: wallywaiter.com/go/ubereats/deluscious\nMap: wallywaiter.com/m/2\n\nWant to see places that aren't open right now too? Just say so.\nFast food or a drive-thru? Just say so.\nVisit Wally for more options: wallywaiter.com/ask",
     ]);
     expect(asTexts({ content: "Just words.", choices: null }, "https://wallywaiter.com")).toEqual(["Just words."]);
     // Around a spot the person named, the distance says where it is from.

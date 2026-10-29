@@ -28,6 +28,8 @@ export interface Place {
   address: string;
   /** The 5-digit ZIP in its full address, when Google gave one. Used to tell where "near me" is; never shown or stored. */
   zip?: string;
+  /** The city in its full address ("Chicago"), when Google gave one. Used to match the place elsewhere; never stored. */
+  city?: string;
   /** What kind of place, in Google's words: "Ice cream shop". */
   kind: string;
   /** Google's one-line description of the place and what it is known for, when it has one. */
@@ -150,6 +152,12 @@ const httpsUrl = (value: string | undefined): string | null => {
     return null;
   }
 };
+
+/** The city in a full address ("1535 W Madison St, Chicago, IL 60607, USA" → Chicago), when it has one. */
+export function cityIn(address: string | null | undefined): string | undefined {
+  const parts = (address ?? "").replace(/,\s*(USA|United States)$/i, "").split(",").map((part) => part.trim()).filter(Boolean);
+  return parts.length >= 3 ? parts[parts.length - 2]!.slice(0, 40) : undefined;
+}
 
 /** The 5-digit ZIP in an address, when it has one ("1535 W Madison St, Chicago, IL 60607" → 60607). */
 export function zipIn(address: string | null | undefined): string | undefined {
@@ -357,6 +365,7 @@ export async function searchPlaces(search: PlaceSearch): Promise<Place[]> {
       name: p.displayName!.text!.trim(),
       address: p.shortFormattedAddress ?? p.formattedAddress ?? "",
       ...(zipIn(p.formattedAddress) ? { zip: zipIn(p.formattedAddress) } : {}),
+      ...(cityIn(p.formattedAddress) ? { city: cityIn(p.formattedAddress) } : {}),
       kind: p.primaryTypeDisplayName?.text ?? "",
       summary: p.editorialSummary?.text?.trim().slice(0, 240) || null,
       point: pointOf(p),

@@ -119,6 +119,8 @@ export interface PlaceInfo {
   orders?: boolean;
   /** A big chain the listing belongs to (see src/lib/chains.ts): the card shows its icon, and Wally knows its drive-thru habit. */
   chain?: { name: string; domain: string; driveThru: "usually" | "sometimes" | "rarely" };
+  /** The place's own page on a delivery app, when a web search found it (see src/lib/server/store-links.ts). Otherwise the app's search for the name stands in. */
+  apps?: { doordash?: string; ubereats?: string };
 }
 
 /** Whether an answer's place cards are the sit-down and independent kind, so offering the fast-food and drive-thru kind next makes sense. */
@@ -221,10 +223,11 @@ export function tidyLink(url: string): string {
  * Numbers stay, because a person may answer with one. `asPlainText` remains
  * the record Wally reads back; this is only how it looks on a phone.
  *
- * A place's link is its website. Without one, the card offers the delivery
- * apps instead, as short links on `origin` (see `textDeliveryLinks`). A
- * Google Maps link is never sent. The options end with a link to `/ask`,
- * where the same conversation is waiting; `sayInSync` adds a line saying so.
+ * A place's links are its website, then DoorDash and Uber Eats (the store's
+ * own page when a web search found it, else the app's search as a short link
+ * on `origin`; see `textDeliveryLinks`), then its map as a short link. The
+ * options end with a link to `/ask`, where the same conversation is waiting;
+ * `sayInSync` adds a line saying so.
  */
 export function asTexts(message: Pick<ChatMessage, "content" | "choices">, origin: string, sayInSync = false): string[] {
   const cards = visibleChoices(message.choices).map((c, i) => {
@@ -239,7 +242,8 @@ export function asTexts(message: Pick<ChatMessage, "content" | "choices">, origi
       p?.orders && "🧾 Order with Wally",
     ].filter(Boolean);
     const site = p ? p.website : c.url;
-    const links = site ? [tidyLink(site)] : p ? textDeliveryLinks(c.title, origin).map((l) => `${l.app}: ${l.url}`) : [];
+    // The site first, then both delivery apps (the store's own page when found), so a text always has a way to order.
+    const links = [...(site ? [tidyLink(site)] : []), ...(p ? textDeliveryLinks(c.title, origin, p.apps).map((l) => `${l.app}: ${l.url}`) : [])];
     // Every place gets its map, so a text can be followed to the door.
     if (p?.maps) links.push(`Map: ${shortMapLink(p.maps, origin)}`);
     return [`${i + 1}. ${c.emoji ? `${c.emoji} ` : ""}${c.title}`, facts.join(" · "), c.detail, ...links].filter(Boolean).join("\n");
@@ -306,26 +310,30 @@ export function splitSources(content: string): { text: string; sources: Source[]
  * are searches, not the restaurant's own page there: no app offers a
  * sanctioned way to look that up, and Wally doesn't scrape them (rule 8).
  */
-export function deliveryLinks(name: string, website?: string | null): { app: string; url: string }[] {
+export function deliveryLinks(name: string, website?: string | null, apps?: PlaceInfo["apps"]): { app: string; url: string; own: boolean }[] {
   const q = encodeURIComponent(name);
-  // A listing whose own website is its page on the app: use that page. Neither app offers a lookup, and rule 8 rules out finding one any other way.
+  // A listing whose own website is its page on the app: use that page. The apps offer no lookup, and rule 8 rules out reading one; a web search (store-links.ts) may have found the page, and that is `apps`.
   const host = hostOf(website ?? "");
   const listed = (app: string) => (host === app || host.endsWith(`.${app}`)) && /\/store\//.test(website ?? "") ? website! : undefined;
+  const doordash = apps?.doordash ?? listed("doordash.com");
+  const ubereats = apps?.ubereats ?? listed("ubereats.com");
   return [
-    { app: "DoorDash", url: listed("doordash.com") ?? `https://www.doordash.com/search/store/${q}/` },
-    { app: "Uber Eats", url: listed("ubereats.com") ?? `https://www.ubereats.com/search?q=${q}` },
+    { app: "DoorDash", url: doordash ?? `https://www.doordash.com/search/store/${q}/`, own: Boolean(doordash) },
+    { app: "Uber Eats", url: ubereats ?? `https://www.ubereats.com/search?q=${q}`, own: Boolean(ubereats) },
   ];
 }
 
 /**
- * The same delivery searches as short links for a text, served by
- * `/go/[app]/[slug]`: "wallywaiter.com/go/doordash/tacos-el-parrillon".
- * Empty when the name has nothing a link can carry.
+ * The delivery links for a text: the store's own page when one was found
+ * (DoorDash's are short enough to send as they are), else the app's search
+ * for the name as a short link served by `/go/[app]/[slug]`:
+ * "wallywaiter.com/go/doordash/tacos-el-parrillon". Empty when the name has
+ * nothing a link can carry.
  */
-export function textDeliveryLinks(name: string, origin: string): { app: string; url: string }[] {
+export function textDeliveryLinks(name: string, origin: string, apps?: PlaceInfo["apps"]): { app: string; url: string }[] {
   const slug = name.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/['\u2019]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 60);
   if (!slug) return [];
-  return deliveryLinks(name).map((l) => ({ app: l.app, url: tidyLink(`${origin}/go/${l.app.toLowerCase().replace(/\s/g, "")}/${slug}`) }));
+  return deliveryLinks(name, undefined, apps).map((l) => ({ app: l.app, url: tidyLink(l.own ? l.url : `${origin}/go/${l.app.toLowerCase().replace(/\s/g, "")}/${slug}`) }));
 }
 
 const BASE62 = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";

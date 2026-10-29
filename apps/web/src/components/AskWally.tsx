@@ -694,7 +694,7 @@ function WallyTurn({
                   )}
                   {[
                     ...(c.place.website ? [{ label: "Website", url: c.place.website, lead: !c.place.orders && isOwnSite(c.place.website) }] : []),
-                    ...deliveryLinks(c.title, c.place.website).map((d) => ({ label: d.app, url: d.url, lead: false })),
+                    ...deliveryLinks(c.title, c.place.website, c.place.apps).map((d) => ({ label: d.app, url: d.url, lead: false })),
                     { label: "Map", url: c.place.maps, lead: false },
                   ].map((link) => (
                     <a key={link.label} href={link.url} target="_blank" rel="noopener noreferrer" className={`inline-flex h-7 items-center rounded-full px-2.5 transition-colors ${link.lead ? CHIP.lead : CHIP.plain}`}>

@@ -1,8 +1,9 @@
 import Anthropic from "@anthropic-ai/sdk";
-import { CURRENT_LOCATION, asPlainText, cityOf, hostOf, isOwnSite, withSources, type Aside, type ChatMessage, type Choice, type MenuSnapshot, type Source, type TicketInfo } from "@/lib/chat";
+import { CURRENT_LOCATION, asPlainText, cityOf, hostOf, isOwnSite, withSources, type Aside, type ChatMessage, type Choice, type MenuSnapshot, type PlaceInfo, type Source, type TicketInfo } from "@/lib/chat";
 import { chainOf } from "@/lib/chains";
 import { chainMenuFor, describeChainMenu } from "./chain-menus";
 import { readSiteMenu, readableSite } from "./menu-site";
+import { findStoreLinks, storeLinksConfigured } from "./store-links";
 import type { Channel } from "./conversation";
 import type { CartItem, MenuEntry, Venue } from "@wally/core";
 import { isConnectorError, mayHandOff, nameMatches, orderingConfigured, orderingConnector, sameStore, zipOf } from "./ordering";
@@ -481,7 +482,7 @@ export function readWeb(blocks: Anthropic.ContentBlock[]): { cited: Source[]; fo
 }
 
 /** A place found this turn, with its distance from the saved address (or from `from`, a spot the person named), whether an earlier answer already showed it, and whether Wally can order there. */
-export type FoundPlace = Place & { miles?: number; from?: string; shown?: boolean; orders?: boolean };
+export type FoundPlace = Place & { miles?: number; from?: string; shown?: boolean; orders?: boolean; apps?: PlaceInfo["apps"] };
 
 /** Straight-line miles within which a place counts as an easy walk from a named spot. */
 export const WALK_MILES = 0.8;
@@ -583,6 +584,7 @@ export function placeChoices(input: unknown, found: ReadonlyMap<string, FoundPla
         maps: place.maps,
         ...(place.orders ? { orders: true } : {}),
         ...(chainOf(place.name) ? { chain: chainOf(place.name)! } : {}),
+        ...(place.apps && Object.keys(place.apps).length ? { apps: place.apps } : {}),
       },
     });
   }
@@ -1007,6 +1009,11 @@ export async function reply(thread: ChatMessage[], guest: Guest, channel: Channe
         continue;
       }
       if (tool.name === SHOW_PLACES_TOOL.name) {
+        // The cards' own pages on the delivery apps, looked up together before the cards go out (a few seconds at most; a miss keeps the app's search).
+        if (storeLinksConfigured()) await Promise.all([...new Set((((tool.input as { places?: unknown })?.places ?? []) as { id?: unknown }[]).map((p) => (typeof p?.id === "string" ? p.id : "")))].filter((id) => found.has(id)).slice(0, MAX_CHOICES).map(async (id) => {
+          const place = found.get(id)!;
+          place.apps ??= await findStoreLinks({ name: place.name, address: place.address, city: place.city });
+        }));
         choices = placeChoices(tool.input, found);
         if (!choices && round < MAX_ROUNDS - 1) {
           answer({ content: "None of those ids came from find_places. Call find_places first, then show_places with ids from its results.", is_error: true });
