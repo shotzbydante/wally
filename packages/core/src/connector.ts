@@ -110,6 +110,14 @@ export interface OrderingConnector {
   readonly kind: ConnectorKind;
   /** Venues that take orders through this connector near a ZIP. `text` may be empty for "everything nearby". */
   search(query: { text: string; zip: string; limit?: number; radiusMiles?: number }): Promise<Venue[]>;
+  /**
+   * Whether one named venue, at a street address, takes orders through this
+   * connector: its venue when it does, null when it doesn't. For a source
+   * whose nearby list is short, this is how a place found elsewhere (a Google
+   * listing) is checked by name. Optional: a source without a by-name lookup
+   * leaves it out, and the agent falls back to `search`.
+   */
+  lookup?(venue: { name: string; address: string }): Promise<Venue | null>;
   /** Menu entries at a venue, or only those matching a few words when `query` is given. */
   menu(venueId: string, query?: string): Promise<MenuEntry[]>;
   /** Builds the cart at the venue and returns the ticket, with every figure from the venue's own system. */

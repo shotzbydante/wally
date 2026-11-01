@@ -88,7 +88,7 @@ const ORDERING = `# Ordering (restaurants that take orders through Square)
 - The location set on the page (their saved address, or the current location they are sharing) is where "near me" is, wherever they live or whatever ZIP their account holds: someone traveling is served where they are. Never ask for a ZIP when a location is set: ordering works from it on its own. Ask for one only if a tool result tells you to, and never answer a request with a question about ZIPs otherwise.
 - When someone says "Order from <place>" without a dish, ask in one short line what they'd like there; you have no menu until find_menu runs with a dish.
 - When someone wants to order something, call find_menu with the restaurant's name and the dish in their words. It tells you whether the place takes orders this way, and lists matching menu items with their prices and the choices each one needs (a base, a protein, a size).
-- If the place doesn't take orders this way, say so in one line and point them to its own site or the delivery apps on its card. Never pretend to order anywhere else.
+- If the place doesn't take orders this way, say in one line that it isn't set up for ordering through you yet, and point them to its own site or the delivery apps on its card. Never say it doesn't take orders at all (it may, on its own site), and never pretend to order anywhere else.
 - Before building the order, you must know every required choice. Ask for the ones the person hasn't given, in one message, offering the options by name. Don't guess a protein or a base.
 - A menu you read in one of your last few answers stays ready: it appears in your own earlier turn as a "Menu at …" line with its item and option ids. When the person answers your question, call order_ticket with those ids straight away; don't call find_menu again for the same place and dish (each read costs money) unless order_ticket says the menu is gone.
 - Only pickup items are listed. If find_menu says the dish is for dining in only, say so and offer another.
@@ -236,8 +236,8 @@ const FIND_MENU_TOOL: Anthropic.Tool = {
   },
 };
 
-/** How many orderable stores are fetched for one turn: the list has no cuisine filter, so it has to be wide enough that a cuisine search can find its matches in it. */
-const STORES_PER_TURN = 80;
+/** How many orderable stores are fetched for one turn: the list has no cuisine filter, so it is asked for as wide as MealMe allows (its MAX_STORES; it answers about 25). A named place that isn't in it is looked up by name and address instead. */
+const STORES_PER_TURN = 40;
 
 /** How many orderable stores named for the search are added to a place search that missed them, each a Places lookup. */
 const MAX_NAMED_ORDERABLE = 3;
@@ -371,6 +371,12 @@ export function pickLines(text: string, lookingFor: string, budget = 6000): stri
 
 /** Loose match between the name the person used and a venue's listed name. */
 export const storeMatches = (wanted: string, store: Pick<Venue, "name">) => nameMatches(wanted, store.name);
+
+/** The street line of a listing's address ("133 S La Brea Ave" from "133 S La Brea Ave, Los Angeles"), when it starts with a street number; what a by-name store lookup needs. */
+export function streetOf(address: string | null | undefined): string | undefined {
+  const street = (address ?? "").split(",")[0]!.trim();
+  return /^\d+[A-Za-z]?\s+\S/.test(street) ? street.slice(0, 80) : undefined;
+}
 
 function searchTool(guest: Guest): Anthropic.WebSearchTool20250305 {
   return {
@@ -824,29 +830,35 @@ export async function reply(thread: ChatMessage[], guest: Guest, channel: Channe
     };
   };
 
-  /** Runs one find_menu call: find the store by name near the person's ZIP, then search its menu. */
+  /**
+   * Runs one find_menu call: find the store, then search its menu. The store
+   * is looked for first in the short list of those near the person, then by
+   * its own name and street address (from its Google listing: this turn's
+   * results, else one lookup by name), since the nearby list holds a couple
+   * of dozen at most and a named place is usually not among them.
+   */
   const findMenu = async (input: unknown): Promise<{ content: string; is_error?: boolean }> => {
     const args = (input ?? {}) as { restaurant?: unknown; dish?: unknown; zip?: unknown };
     const restaurant = clip(args.restaurant, 80);
     const dish = clip(args.dish, 80);
-    const zip = await orderingZip(args.zip);
     if (!restaurant || !dish) return { content: "Give the restaurant and the dish.", is_error: true };
-    if (!zip) {
-      return {
-        content: guest.near
-          ? "Their location couldn't be placed just now, so the restaurants that take orders near them can't be looked up. Tell the person plainly that ordering isn't working at the moment, and point them to the restaurant's own site or the delivery apps on its card. Don't ask for a ZIP."
-          : "No location is set, so there is nowhere to look for restaurants that take orders. Ask the person, in one short line, to set their location in the bar at the top of the page, or (by text) for their ZIP.",
-        is_error: true,
-      };
-    }
     if (!ordering) return { content: "Ordering isn't switched on.", is_error: true };
+    const zip = await orderingZip(args.zip);
+    if (!zip && !guest.near && !placesConfigured()) {
+      return { content: "No location is set, so there is nowhere to look for restaurants that take orders. Ask the person, in one short line, to set their location in the bar at the top of the page, or (by text) for their ZIP.", is_error: true };
+    }
     try {
       // The same store list a place search fetched this turn, so it isn't billed twice.
-      const stores = await orderableStores(args.zip);
-      const store = stores.find((s) => storeMatches(restaurant, s));
+      const stores = zip ? await orderableStores(args.zip) : [];
+      let store = stores.find((s) => storeMatches(restaurant, s));
+      if (!store && ordering.lookup) {
+        const place = [...found.values()].find((p) => nameMatches(restaurant, p.name) || nameMatches(p.name, restaurant)) ?? (placesConfigured() ? await lookUpByName(restaurant) : null);
+        const street = streetOf(place?.address);
+        if (place && street) store = (await ordering.lookup({ name: place.name, address: street })) ?? undefined;
+      }
       if (!store) {
         const names = stores.slice(0, 6).map((s) => s.name);
-        return { content: JSON.stringify({ takes_orders: false, note: "This restaurant doesn't take orders through Wally yet. Point the person to its own site or the delivery apps on its card.", nearby_that_do: names }) };
+        return { content: JSON.stringify({ takes_orders: false, note: "This restaurant isn't set up for ordering through Wally (it isn't in the ordering directory Wally can build carts from). Say so in one line and point the person to its own site or the delivery apps on its card; never say it doesn't take orders at all.", nearby_that_do: names }) };
       }
       const entries = await ordering.menu(store.id, dish);
       menu = menuFound(store, entries);

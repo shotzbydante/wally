@@ -105,8 +105,9 @@ async function call<T>(path: string, body?: unknown): Promise<T> {
     data = JSON.parse(text);
   } catch {}
   if (!res.ok) {
-    // MealMe sometimes answers with an object under message; keep it a string so the error stays a MealMeError.
-    const raw = (data as { message?: unknown } | null)?.message;
+    // MealMe sometimes answers with an object under message, and a 502 from Square's lookup puts its words under diagnostic; keep it a string so the error stays a MealMeError.
+    const body = data as { message?: unknown; diagnostic?: { code?: unknown; message?: unknown } } | null;
+    const raw = body?.message ?? body?.diagnostic?.message;
     const message = typeof raw === "string" ? raw : raw ? JSON.stringify(raw) : `${res.status}`;
     // Status and MealMe's own message: enough to diagnose, nothing from the conversation.
     console.error(`[mealme] ${path.split("?")[0]} ${res.status} ${message.slice(0, 200)}`);
@@ -126,6 +127,9 @@ const cents = (p: { amount?: number; amountCents?: number } | undefined): number
   return n !== null && Number.isInteger(n) && n >= 0 ? n : null;
 };
 
+/** The most stores one search may ask for: above it MealMe answers 500 every time (seen 2026-11-01: 60 and 80 fail, 40 works and returns about 25). */
+export const MAX_STORES = 40;
+
 /**
  * Restaurants that take orders through Square, near a ZIP code. MealMe's
  * server fails (500) on a wide search, so a big ask steps down to a smaller
@@ -133,10 +137,40 @@ const cents = (p: { amount?: number; amountCents?: number } | undefined): number
  */
 export async function searchStores(zip: string, limit = 10, radius = 6): Promise<Store[]> {
   try {
-    return await storesPage(zip, limit, radius);
+    return await storesPage(zip, Math.min(limit, MAX_STORES), radius);
   } catch (error) {
     if (!(error instanceof MealMeError) || error.status < 500 || limit <= 20) throw error;
-    return searchStores(zip, Math.max(20, Math.floor(limit / 2)), Math.min(radius, 6));
+    return searchStores(zip, Math.max(20, Math.floor(Math.min(limit, MAX_STORES) / 2)), Math.min(radius, 6));
+  }
+}
+
+/**
+ * MealMe's id for a Square store is its brand name and street address, as
+ * JSON in base64 after "cashapp_" (observed in every id its store search
+ * returns; not documented). Square's own lookup behind it is forgiving on the
+ * name ("Marlowe" finds "Marlowe Coffee & Eatery") and firm on the street
+ * address, so a store can be reached by the name and address on its Google
+ * listing without appearing in the short nearby list.
+ */
+export function locationIdFor(name: string, address: string): string {
+  return `cashapp_${Buffer.from(JSON.stringify({ brandName: name.trim(), address: address.trim() })).toString("base64").replace(/=+$/, "")}`;
+}
+
+/**
+ * Whether a store at a street address takes orders through Square, by asking
+ * for its menu under the id built from its name and address. A store Square
+ * doesn't know answers 502 with its own "couldn't find" message, which is a
+ * plain no, not a failure; anything else is thrown as usual. One successful
+ * call is billed like any other.
+ */
+export async function lookupStore(name: string, address: string): Promise<Store | null> {
+  const id = locationIdFor(name, address);
+  try {
+    const items = await searchMenu(id, "", 1);
+    return items.length ? { id, name: name.trim(), address: address.trim() } : null;
+  } catch (error) {
+    if (error instanceof MealMeError && error.status === 502 && /couldn't find|could not find|not found/i.test(error.message)) return null;
+    throw error;
   }
 }
 
@@ -264,10 +298,14 @@ export function mealmeConnector(customer: string): OrderingConnector {
     id: "mealme",
     kind: "aggregator",
     async search({ text, zip, limit, radiusMiles }) {
-      // MealMe's store search has no text filter; the agent matches names itself. The words are kept for a connector that can use them.
+      // MealMe's store search has no text filter (query, search and name are ignored; checked 2026-11-01); the agent matches names itself. The words are kept for a connector that can use them.
       void text;
       const stores = await searchStores(zip, limit ?? 10, radiusMiles ?? 6);
       return stores.map(venueOf);
+    },
+    async lookup({ name, address }) {
+      const store = await lookupStore(name, address);
+      return store && venueOf(store);
     },
     async menu(venueId, query) {
       const items = await searchMenu(venueId, query ?? "", 8);

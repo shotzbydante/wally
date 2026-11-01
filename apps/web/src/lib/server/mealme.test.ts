@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { dollars, ticketLines, asPlainText, asTexts, menuLines, visibleChoices, type MenuSnapshot } from "@/lib/chat";
-import { MENU_TURNS, describeMenu, menuFound, savedMenu, storeMatches, storeNamedFor, type MenuFound } from "./agent";
-import { checkout, mealmeConnector, searchMenu, searchStores, type MenuItem, type Store } from "./mealme";
+import { MENU_TURNS, describeMenu, menuFound, savedMenu, storeMatches, storeNamedFor, streetOf, type MenuFound } from "./agent";
+import { checkout, locationIdFor, lookupStore, mealmeConnector, searchMenu, searchStores, type MenuItem, type Store } from "./mealme";
 import { mayHandOff, sameStore, zipOf } from "./ordering";
 
 afterEach(() => {
@@ -44,10 +44,30 @@ describe("mealme", () => {
   });
   it("steps a wide store search down when MealMe fails on it", async () => {
     const raw = { providerLocationId: "cashapp_abc", name: "Poke Bar Los Angeles", address: "5273 W Olympic Blvd", raw: { distanceMiles: 0.7, isOpen: true } };
-    const calls = mealme([{ status: 500, body: { message: "boom" } }, { status: 500, body: { message: "boom" } }, { body: { stores: [raw] } }]);
+    const calls = mealme([{ status: 500, body: { message: "boom" } }, { body: { stores: [raw] } }]);
+    // Never more than MAX_STORES: above it MealMe fails every time.
     expect(await searchStores("90036", 80, 8)).toEqual([store]);
-    expect(calls.map((c) => /radiusInMiles=(\d+)&limit=(\d+)/.exec(c.url)!.slice(1).join("/"))).toEqual(["8/80", "6/40", "6/20"]);
+    expect(calls.map((c) => /radiusInMiles=(\d+)&limit=(\d+)/.exec(c.url)!.slice(1).join("/"))).toEqual(["8/40", "6/20"]);
     await expect(searchStores("90036", 20)).rejects.toThrow();
+  });
+  it("builds MealMe's own id for a store from its name and street address, as its search returns them", () => {
+    expect(locationIdFor("Poke Bar Los Angeles", "5273 W Olympic Blvd")).toBe("cashapp_eyJicmFuZE5hbWUiOiJQb2tlIEJhciBMb3MgQW5nZWxlcyIsImFkZHJlc3MiOiI1MjczIFcgT2x5bXBpYyBCbHZkIn0");
+    expect(JSON.parse(Buffer.from(locationIdFor(" Marlowe ", "5600 Wilshire Blvd ").slice("cashapp_".length), "base64").toString())).toEqual({ brandName: "Marlowe", address: "5600 Wilshire Blvd" });
+  });
+  it("looks a store up by name and address: a menu means yes, Square's 'couldn't find' means no, anything else is an error", async () => {
+    const item = { providerItemId: "A", title: "Latte", price: { amountCents: 500 }, fulfillment: ["PICKUP"], raw: { unitToken: "T", menuItemVariationId: "V" } };
+    const calls = mealme([
+      { body: { items: [item] } },
+      { status: 502, body: { items: [], diagnostic: { code: "square_mcp_tool_failed", message: "Couldn't find a restaurant matching 'Neighborhood' near '133 S La Brea Ave'." } } },
+      { status: 503, body: { message: "down" } },
+    ]);
+    expect(await lookupStore("Marlowe", "5600 Wilshire Blvd")).toEqual({ id: locationIdFor("Marlowe", "5600 Wilshire Blvd"), name: "Marlowe", address: "5600 Wilshire Blvd" });
+    expect(calls[0]!.url).toContain(`/api/catalog/search?providerId=square&locationId=${encodeURIComponent(locationIdFor("Marlowe", "5600 Wilshire Blvd"))}&query=&limit=1`);
+    expect(await lookupStore("Neighborhood", "133 S La Brea Ave")).toBeNull();
+    await expect(lookupStore("Marlowe", "5600 Wilshire Blvd")).rejects.toThrow("down");
+    // And through the connector.
+    mealme([{ body: { items: [item] } }]);
+    expect(await mealmeConnector("acct").lookup!({ name: "Marlowe", address: "5600 Wilshire Blvd" })).toEqual({ id: locationIdFor("Marlowe", "5600 Wilshire Blvd"), name: "Marlowe", address: "5600 Wilshire Blvd" });
   });
   it("knows when a store is named for what was searched", () => {
     expect(storeNamedFor(store, "poke restaurants near me")).toBe(true);
@@ -122,6 +142,12 @@ describe("ordering in the agent", () => {
     expect(storeMatches("poke bar los angeles", store)).toBe(true);
     expect(storeMatches("Sushi Gen", store)).toBe(false);
     expect(storeMatches("the", store)).toBe(false);
+  });
+  it("takes the street line of a listing's address for a by-name lookup, and nothing that isn't one", () => {
+    expect(streetOf("133 S La Brea Ave, Los Angeles")).toBe("133 S La Brea Ave");
+    expect(streetOf("5600 Wilshire Blvd")).toBe("5600 Wilshire Blvd");
+    expect(streetOf("Los Angeles, CA")).toBeUndefined();
+    expect(streetOf("")).toBeUndefined();
   });
   it("recognises a Google place as a store that takes orders, by name and street number", () => {
     expect(sameStore({ name: "Poke Bar", address: "5273 W Olympic Blvd, Los Angeles" }, store)).toBe(true);
