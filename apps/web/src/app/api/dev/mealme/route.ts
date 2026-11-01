@@ -52,15 +52,10 @@ export async function GET(request: Request) {
       out.noType = summarize(await call(`/api/stores/search?providerId=square&zipCode=${zip}&radiusInMiles=2&limit=60`), want);
     } else if (step === "catalog") {
       const id = (brandName: string, address: string) => `cashapp_${Buffer.from(JSON.stringify({ brandName, address })).toString("base64").replace(/=+$/, "")}`;
-      const tries = [
-        ["Neighborhood", "133 S La Brea Ave"],
-        ["Neighborhood", "133 S La Brea Ave, Los Angeles, CA 90036"],
-        ["Neighborhood Coffee Shop", "133 S La Brea Ave"],
-        ["Neighborhood", "133 South La Brea Avenue"],
-      ] as const;
+      const tries = (url.searchParams.get("tries") ?? "Neighborhood|133 S La Brea Ave").split(";;").map((t) => t.split("|") as unknown as readonly [string, string]);
       out.catalog = await Promise.all(
         tries.map(async ([b, a]) => {
-          const r = await call(`/api/catalog/search?providerId=square&locationId=${encodeURIComponent(id(b, a))}&query=${encodeURIComponent("iced coffee")}&limit=5`);
+          const r = await call(`/api/catalog/search?providerId=square&locationId=${encodeURIComponent(id(b, a))}&query=${encodeURIComponent(url.searchParams.get("q") ?? "iced coffee")}&limit=5`);
           const items = (r.body as { items?: { title?: string }[] })?.items ?? [];
           return { brandName: b, address: a, status: r.status, ms: r.ms, items: items.length, first: items[0]?.title, ...(r.status >= 400 ? { error: r.body } : {}) };
         }),
