@@ -203,7 +203,14 @@ export async function searchMenu(storeId: string, query: string, limit = 8): Pro
       requiredModifierLists?: { id: string; name: string; minSelection?: number; maxSelection?: number; options?: { id: string; name: string; price?: { amount?: number; amountCents?: number } }[] }[];
     };
   }
-  const data = await call<{ items?: RawItem[] }>(`/api/catalog/search?${q}`);
+  let data: { items?: RawItem[] };
+  try {
+    data = await call<{ items?: RawItem[] }>(`/api/catalog/search?${q}`);
+  } catch (error) {
+    // "No menu items matching 'x' were found at <store>" comes as a 404: the store is there, the dish isn't. An empty menu, not a failure.
+    if (error instanceof MealMeError && error.status === 404 && /no menu items matching/i.test(error.message)) return [];
+    throw error;
+  }
   const items: MenuItem[] = [];
   for (const i of data.items ?? []) {
     if (!i.providerItemId || !i.title || !i.raw?.unitToken || !i.raw.menuItemVariationId) continue;

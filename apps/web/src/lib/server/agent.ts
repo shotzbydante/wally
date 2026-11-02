@@ -372,6 +372,9 @@ export function pickLines(text: string, lookingFor: string, budget = 6000): stri
 /** Loose match between the name the person used and a venue's listed name. */
 export const storeMatches = (wanted: string, store: Pick<Venue, "name">) => nameMatches(wanted, store.name);
 
+/** Whether a listing is the kind that serves food or drink, by Google's own words for what it is ("Coffee shop", not "Apartment building"). */
+export const servesFood = (place: Pick<Place, "kind">) => /restaurant|caf[eé]|coffee|espresso|tea|bar\b|pub\b|bakery|patisserie|food|grill|pizza|kitchen|diner|deli|eatery|juice|smoothie|dessert|ice cream|gelato|donut|doughnut|taco|taqueria|sushi|ramen|noodle|burger|sandwich|bistro|brasserie|brunch|breakfast|steak|seafood|bbq|barbecue|wine|brew|cocktail|lounge|creperie|bagel|bubble tea|boba|chicken|wings|hot dog|cantina|trattoria|osteria|izakaya|pho|dumpling|dim sum|shawarma|kebab|falafel|poke|salad|vegan|vegetarian|market|takeout|take-out|fast food|chocolate|candy|cupcake|cookie|pastry|confection|caterer|buffet/i.test(place.kind);
+
 /** The street line of a listing's address ("133 S La Brea Ave" from "133 S La Brea Ave, Los Angeles"), when it starts with a street number; what a by-name store lookup needs. */
 export function streetOf(address: string | null | undefined): string | undefined {
   const street = (address ?? "").split(",")[0]!.trim();
@@ -777,8 +780,10 @@ export async function reply(thread: ChatMessage[], guest: Guest, channel: Channe
    * show_places could draw its card. Null when nothing by that name turns up.
    */
   const lookUpByName = async (name: string): Promise<FoundPlace | null> => {
-    const places = await searchPlaces({ query: name, bias: guest.near, limit: 3, travel: guest.near ? { from: guest.near, mode: "DRIVE" } : null }).catch(() => [] as Place[]);
-    const place = places.find((p) => nameMatches(name, p.name) || nameMatches(p.name, name)) ?? places[0];
+    const places = await searchPlaces({ query: name, bias: guest.near, limit: 5, travel: guest.near ? { from: guest.near, mode: "DRIVE" } : null }).catch(() => [] as Place[]);
+    // A bare name can match anything ("Marlowe" is also an apartment building): a place that serves food comes first, then any whose name fits.
+    const named = places.filter((p) => nameMatches(name, p.name) || nameMatches(p.name, name));
+    const place = named.find((p) => servesFood(p)) ?? places.find((p) => servesFood(p)) ?? named[0] ?? places[0];
     if (!place) return null;
     const id = `p${found.size + 1}`;
     const hit: FoundPlace = { ...place, ...(guest.near && place.point ? { miles: milesBetween(guest.near, place.point) } : {}), ...(shown.has(place.id) ? { shown: true } : {}) };
@@ -868,7 +873,7 @@ export async function reply(thread: ChatMessage[], guest: Guest, channel: Channe
       menuUsed = true;
       const dineInOnly = entries.length - Object.keys(menu.items).length;
       if (!Object.keys(menu.items).length) {
-        return { content: JSON.stringify({ restaurant: store.name, takes_orders: true, items: [], note: dineInOnly ? "The matching items are for dining in only, not pickup. Say so, and offer another dish." : "Nothing on the menu matched. Try other words for the dish." }) };
+        return { content: JSON.stringify({ restaurant: store.name, takes_orders: true, items: [], note: dineInOnly ? "The matching items are for dining in only, not pickup. Say so, and offer another dish." : "Nothing on the menu matched those words. Call find_menu again with one or two other words the menu might use (\"cold brew\" or \"coffee\" for an iced coffee; \"latte\" for a drink with milk); after a second miss, say what you looked for and ask what they'd like to call it." }) };
       }
       return { content: describeMenu(menu) };
     } catch (error) {

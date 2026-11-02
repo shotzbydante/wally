@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { dollars, ticketLines, asPlainText, asTexts, menuLines, visibleChoices, type MenuSnapshot } from "@/lib/chat";
-import { MENU_TURNS, describeMenu, menuFound, savedMenu, storeMatches, storeNamedFor, streetOf, type MenuFound } from "./agent";
+import { MENU_TURNS, describeMenu, menuFound, savedMenu, servesFood, storeMatches, storeNamedFor, streetOf, type MenuFound } from "./agent";
 import { checkout, locationIdFor, lookupStore, mealmeConnector, searchMenu, searchStores, type MenuItem, type Store } from "./mealme";
 import { mayHandOff, sameStore, zipOf } from "./ordering";
 
@@ -84,6 +84,12 @@ describe("mealme", () => {
     mealme([{ body: { items: [{ providerItemId: "CALI_1", title: "Small Poke Bowl", description: "Build your bowl.", price: { amount: 1549 }, fulfillment: ["PICKUP"], raw: { unitToken: "LCS", menuItemVariationId: "CALIV_1", variations: [{ id: "CALIV_1", name: "Regular" }], requiredModifierLists: [{ id: "L1", name: "Base Choice", minSelection: 1, maxSelection: 2, options: [{ id: "M1", name: "White Rice", price: { amount: 0 } }, { id: "M2", name: "Brown Rice", price: { amount: 0 } }] }, { id: "L2", name: "Protein", minSelection: 1, maxSelection: 1, options: [{ id: "M3", name: "Salmon", price: { amount: 0 } }, { id: "M4", name: "Tuna", price: { amount: 150 } }] }] } }, { providerItemId: "x", title: "No tokens" }] } }]);
     expect(await searchMenu("cashapp_abc", "bowl")).toEqual([bowl]);
   });
+  it("treats MealMe's 'no menu items matching' 404 as an empty menu, not a failure", async () => {
+    mealme([{ status: 404, body: { message: 'No menu items matching "iced coffee" were found at Marlowe Coffee & Eatery. Try another search term.' } }, { body: { items: [] } }]);
+    expect(await searchMenu("cashapp_abc", "iced coffee")).toEqual([]);
+    // Through a by-name lookup the store still counts as found.
+    expect((await lookupStore("Marlowe", "5600 Wilshire Blvd", "iced coffee"))!.items).toEqual([]);
+  });
   it("leaves out an item whose price, or an option's price, can't be read, rather than guess a figure", async () => {
     const good = { providerItemId: "A", title: "Soup", price: { amountCents: 800 }, fulfillment: ["PICKUP"], raw: { unitToken: "T", menuItemVariationId: "V" } };
     mealme([{ body: { items: [good, { ...good, providerItemId: "B", price: { amount: "12.50" } }, { ...good, providerItemId: "C", price: { amount: -1 } }, { ...good, providerItemId: "D", raw: { ...good.raw, requiredModifierLists: [{ id: "L", name: "Size", options: [{ id: "O", name: "Large", price: { amount: 1.5 } }] }] } }, { ...good, providerItemId: "E", price: undefined }] } }]);
@@ -146,6 +152,12 @@ describe("ordering in the agent", () => {
     expect(storeMatches("poke bar los angeles", store)).toBe(true);
     expect(storeMatches("Sushi Gen", store)).toBe(false);
     expect(storeMatches("the", store)).toBe(false);
+  });
+  it("tells a place that serves food from one that doesn't, by Google's kind", () => {
+    expect(servesFood({ kind: "Coffee shop" })).toBe(true);
+    expect(servesFood({ kind: "Mexican restaurant" })).toBe(true);
+    expect(servesFood({ kind: "Apartment building" })).toBe(false);
+    expect(servesFood({ kind: "" })).toBe(false);
   });
   it("takes the street line of a listing's address for a by-name lookup, and nothing that isn't one", () => {
     expect(streetOf("133 S La Brea Ave, Los Angeles")).toBe("133 S La Brea Ave");
