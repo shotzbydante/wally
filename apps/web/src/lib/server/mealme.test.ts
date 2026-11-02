@@ -61,13 +61,17 @@ describe("mealme", () => {
       { status: 502, body: { items: [], diagnostic: { code: "square_mcp_tool_failed", message: "Couldn't find a restaurant matching 'Neighborhood' near '133 S La Brea Ave'." } } },
       { status: 503, body: { message: "down" } },
     ]);
-    expect(await lookupStore("Marlowe", "5600 Wilshire Blvd")).toEqual({ id: locationIdFor("Marlowe", "5600 Wilshire Blvd"), name: "Marlowe", address: "5600 Wilshire Blvd" });
-    expect(calls[0]!.url).toContain(`/api/catalog/search?providerId=square&locationId=${encodeURIComponent(locationIdFor("Marlowe", "5600 Wilshire Blvd"))}&query=&limit=1`);
-    expect(await lookupStore("Neighborhood", "133 S La Brea Ave")).toBeNull();
-    await expect(lookupStore("Marlowe", "5600 Wilshire Blvd")).rejects.toThrow("down");
-    // And through the connector.
+    const marlowe = { id: locationIdFor("Marlowe", "5600 Wilshire Blvd"), name: "Marlowe", address: "5600 Wilshire Blvd" };
+    expect((await lookupStore("Marlowe", "5600 Wilshire Blvd", "latte"))!.store).toEqual(marlowe);
+    // MealMe requires a query, so the dish is the query and the menu search rides on the lookup.
+    expect(calls[0]!.url).toContain(`/api/catalog/search?providerId=square&locationId=${encodeURIComponent(marlowe.id)}&query=latte&limit=8`);
+    expect(await lookupStore("Neighborhood", "133 S La Brea Ave", "iced coffee")).toBeNull();
+    await expect(lookupStore("Marlowe", "5600 Wilshire Blvd", "latte")).rejects.toThrow("down");
+    // And through the connector, with the entries ready to order.
     mealme([{ body: { items: [item] } }]);
-    expect(await mealmeConnector("acct").lookup!({ name: "Marlowe", address: "5600 Wilshire Blvd" })).toEqual({ id: locationIdFor("Marlowe", "5600 Wilshire Blvd"), name: "Marlowe", address: "5600 Wilshire Blvd" });
+    const hit = await mealmeConnector("acct").lookup!({ name: "Marlowe", address: "5600 Wilshire Blvd" }, "latte");
+    expect(hit!.venue).toEqual(marlowe);
+    expect(hit!.entries.map((e) => e.name)).toEqual(["Latte"]);
   });
   it("knows when a store is named for what was searched", () => {
     expect(storeNamedFor(store, "poke restaurants near me")).toBe(true);

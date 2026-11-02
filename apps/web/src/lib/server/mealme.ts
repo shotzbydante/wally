@@ -157,17 +157,18 @@ export function locationIdFor(name: string, address: string): string {
 }
 
 /**
- * Whether a store at a street address takes orders through Square, by asking
- * for its menu under the id built from its name and address. A store Square
- * doesn't know answers 502 with its own "couldn't find" message, which is a
- * plain no, not a failure; anything else is thrown as usual. One successful
- * call is billed like any other.
+ * Whether a store at a street address takes orders through Square, by
+ * searching its menu for `query` under the id built from its name and
+ * address (MealMe requires a query, so the dish is it, and the items come
+ * back with the answer). A store Square doesn't know answers 502 with its
+ * own "couldn't find" message, which is a plain no, not a failure; anything
+ * else is thrown as usual. One successful call is billed like any other.
  */
-export async function lookupStore(name: string, address: string): Promise<Store | null> {
+export async function lookupStore(name: string, address: string, query: string, limit = 8): Promise<{ store: Store; items: MenuItem[] } | null> {
   const id = locationIdFor(name, address);
   try {
-    const items = await searchMenu(id, "", 1);
-    return items.length ? { id, name: name.trim(), address: address.trim() } : null;
+    const items = await searchMenu(id, query.trim() || "menu", limit);
+    return { store: { id, name: name.trim(), address: address.trim() }, items };
   } catch (error) {
     if (error instanceof MealMeError && error.status === 502 && /couldn't find|could not find|not found/i.test(error.message)) return null;
     throw error;
@@ -286,6 +287,15 @@ function unpackItemId(packed: string): Pick<MenuItem, "id" | "unitToken" | "vari
   return id && unitToken && variationId ? { id, unitToken, variationId } : null;
 }
 
+const entryOf = (i: MenuItem): MenuEntry => ({
+  itemId: packItemId(i),
+  name: i.variationName && i.variationName !== "Regular" ? `${i.name} (${i.variationName})` : i.name,
+  description: i.description,
+  unitPrice: i.cents,
+  pickup: i.pickup,
+  choices: i.required.map((l) => ({ id: l.id, name: l.name, min: l.min, max: l.max, options: l.options.map((o) => ({ id: o.id, name: o.name, price: o.cents })) })),
+});
+
 const venueOf = (store: Store): Venue => ({ id: store.id, name: store.name, address: store.address, ...(store.open !== undefined ? { open: store.open } : {}), ...(store.miles !== undefined ? { distanceMiles: store.miles } : {}) });
 
 /**
@@ -303,22 +313,13 @@ export function mealmeConnector(customer: string): OrderingConnector {
       const stores = await searchStores(zip, limit ?? 10, radiusMiles ?? 6);
       return stores.map(venueOf);
     },
-    async lookup({ name, address }) {
-      const store = await lookupStore(name, address);
-      return store && venueOf(store);
+    async lookup({ name, address }, query) {
+      const found = await lookupStore(name, address, query);
+      return found && { venue: venueOf(found.store), entries: found.items.map(entryOf) };
     },
     async menu(venueId, query) {
       const items = await searchMenu(venueId, query ?? "", 8);
-      return items.map(
-        (i): MenuEntry => ({
-          itemId: packItemId(i),
-          name: i.variationName && i.variationName !== "Regular" ? `${i.name} (${i.variationName})` : i.name,
-          description: i.description,
-          unitPrice: i.cents,
-          pickup: i.pickup,
-          choices: i.required.map((l) => ({ id: l.id, name: l.name, min: l.min, max: l.max, options: l.options.map((o) => ({ id: o.id, name: o.name, price: o.cents })) })),
-        }),
-      );
+      return items.map(entryOf);
     },
     async quote(venue, items, tip) {
       // One dish per checkout: MealMe's Square checkout takes a single item spec and ignores extra cart items.

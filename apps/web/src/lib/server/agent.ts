@@ -851,16 +851,19 @@ export async function reply(thread: ChatMessage[], guest: Guest, channel: Channe
       // The same store list a place search fetched this turn, so it isn't billed twice.
       const stores = zip ? await orderableStores(args.zip) : [];
       let store = stores.find((s) => storeMatches(restaurant, s));
+      let entries: MenuEntry[] | undefined;
       if (!store && ordering.lookup) {
+        // By name and street address, with the dish as the query, so the menu search rides on the same call.
         const place = [...found.values()].find((p) => nameMatches(restaurant, p.name) || nameMatches(p.name, restaurant)) ?? (placesConfigured() ? await lookUpByName(restaurant) : null);
         const street = streetOf(place?.address);
-        if (place && street) store = (await ordering.lookup({ name: place.name, address: street })) ?? undefined;
+        const hit = place && street ? await ordering.lookup({ name: place.name, address: street }, dish) : null;
+        if (hit) ({ venue: store, entries } = hit);
       }
       if (!store) {
         const names = stores.slice(0, 6).map((s) => s.name);
         return { content: JSON.stringify({ takes_orders: false, note: "This restaurant isn't set up for ordering through Wally (it isn't in the ordering directory Wally can build carts from). Say so in one line and point the person to its own site or the delivery apps on its card; never say it doesn't take orders at all.", nearby_that_do: names }) };
       }
-      const entries = await ordering.menu(store.id, dish);
+      entries ??= await ordering.menu(store.id, dish);
       menu = menuFound(store, entries);
       menuUsed = true;
       const dineInOnly = entries.length - Object.keys(menu.items).length;
