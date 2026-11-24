@@ -210,12 +210,24 @@ body {
 .composer:focus-within {
   box-shadow: 0 0 0 4px rgba(60, 194, 143, 0.2), 0 18px 44px -20px rgba(14, 124, 87, 0.55);
 }
-/* The dock under the conversation: the thread fades out in its top few pixels, and from there down it is solid,
-   so nothing shows through behind the message box. The shadow carries the same colour 100px below it, because
-   iOS Safari paints the page underneath its floating toolbar and the keyboard's bar. A shadow adds no scroll height. */
+/* Ask Wally's room: the header, the location bar, the conversation and the message box stacked in a box exactly as
+   tall as the screen, with only the conversation scrolling inside it. Nothing is pinned with sticky or fixed, because
+   iOS Safari slides the page under the keyboard instead of shrinking it and (since iOS 26) strands pinned elements
+   mid-screen once the keyboard has been opened and closed. AskWally sets --room-h and --room-top from the visual
+   viewport, so the message box sits on the keyboard; without them the room is the dynamic viewport. */
+.room {
+  display: flex;
+  flex-direction: column;
+  height: var(--room-h, 100dvh);
+  /* Placed with top, not a transform: a transform would start a stacking group and put a box around Wally (see his blend rule). */
+  position: relative;
+  top: var(--room-top, 0px);
+  overflow: hidden;
+}
+/* The dock under the conversation: the thread fades out in its top few pixels, and from there down it is solid. */
 .dock {
+  margin-top: -12px;
   background-image: linear-gradient(180deg, rgba(244, 246, 250, 0) 0, var(--paper) 12px, #eef6f3 100%);
-  box-shadow: 0 100px 0 0 #eef6f3;
 }
 /* Sticky strips let the conversation fade out beneath them instead of cutting it off. */
 .fade-under::after {

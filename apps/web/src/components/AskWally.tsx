@@ -37,9 +37,9 @@ const idleLines = ["At your service.", "What else can I get you?", "Ready when y
 const greeting = (name: string) => `Hi${name ? ` ${name}` : ""}, I’m Wally, your personal waiter. What can I serve up for you today?`;
 
 const noSubscription = () => () => {};
-const nearBottom = () => window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 220;
-const toBottom = (smooth: boolean) =>
-  window.scrollTo({ top: document.documentElement.scrollHeight, behavior: smooth ? "smooth" : "instant" });
+// The conversation scrolls inside its own box (see `.room` in globals.css), never the page.
+const nearBottom = (box: HTMLElement | null) => !box || box.clientHeight + box.scrollTop >= box.scrollHeight - 220;
+const toBottom = (box: HTMLElement | null, smooth: boolean) => box?.scrollTo({ top: box.scrollHeight, behavior: smooth ? "smooth" : "instant" });
 
 export function AskWally({
   name,
@@ -86,7 +86,8 @@ export function AskWally({
   }, [cheer]);
 
   // Open on the latest message.
-  useEffect(() => toBottom(false), []);
+  const thread = useRef<HTMLDivElement>(null);
+  useEffect(() => void toBottom(thread.current, false), []);
 
   // Messages can arrive from elsewhere (another device, and soon text), so
   // look again whenever the person comes back to this tab.
@@ -148,8 +149,42 @@ export function AskWally({
   // Follow the conversation down the page unless the person has scrolled up to read.
   const follow = useRef(true);
   useEffect(() => {
-    if (follow.current) toBottom(true);
+    if (follow.current) toBottom(thread.current, true);
   }, [messages, pending]);
+
+  // Keep the room exactly over the part of the screen the keyboard leaves free. Safari on iOS doesn't shrink the page
+  // for the keyboard, it slides the page under it, and since iOS 26 it can leave pinned (sticky or fixed) elements
+  // stranded mid-screen after the keyboard has been opened and closed once. So nothing here is pinned: the room takes
+  // its height and its place from the visual viewport. Left alone while pinch-zoomed, where that viewport is the zoom.
+  useEffect(() => {
+    const view = window.visualViewport;
+    if (!view) return;
+    const root = document.documentElement.style;
+    let before = view.height;
+    const fit = () => {
+      if (Math.abs(view.scale - 1) > 0.01) {
+        root.removeProperty("--room-h");
+        root.removeProperty("--room-top");
+        return;
+      }
+      root.setProperty("--room-h", `${view.height}px`);
+      root.setProperty("--room-top", `${view.pageTop}px`);
+      // The keyboard opening shortens the room: stay on the latest message if that is where the person was.
+      const box = thread.current;
+      const lost = before - view.height;
+      if (box && lost > 80 && box.scrollHeight - box.scrollTop - box.clientHeight <= 220 + lost) toBottom(box, false);
+      before = view.height;
+    };
+    fit();
+    view.addEventListener("resize", fit);
+    view.addEventListener("scroll", fit);
+    return () => {
+      view.removeEventListener("resize", fit);
+      view.removeEventListener("scroll", fit);
+      root.removeProperty("--room-h");
+      root.removeProperty("--room-top");
+    };
+  }, []);
 
   const fail = (code: string, text: string) => {
     setPending(null);
@@ -192,7 +227,7 @@ export function AskWally({
     const handle = (event: ChatEvent) => {
       if (event.type === "text") {
         setMood("speaking");
-        follow.current = nearBottom();
+        follow.current = nearBottom(thread.current);
         setPending((p) => (p ? { ...p, answer: p.answer + event.text, searching: false } : p));
       } else if (event.type === "searching") {
         setMood("thinking");
@@ -301,7 +336,7 @@ export function AskWally({
   return (
     <>
     {places && <LocationBar saved={address} onChange={setAddress} />}
-    <main className="mx-auto flex w-full max-w-[1080px] flex-1 flex-col px-5 sm:px-8 min-[900px]:flex-row min-[900px]:gap-12">
+    <main className="mx-auto flex min-h-0 w-full max-w-[1080px] flex-1 flex-col px-5 sm:px-8 min-[900px]:flex-row min-[900px]:gap-12">
       {/* Wally: beside the conversation on wide screens, above it on narrow ones.
           This box is its own stacking group, so wherever the full render shows it must carry Wally's blend (see globals.css). */}
       <aside
@@ -354,7 +389,12 @@ export function AskWally({
         </div>
       </aside>
 
-      <section className={`mx-auto flex w-full max-w-[640px] min-w-0 flex-1 flex-col min-[900px]:mx-0 min-[900px]:pt-6 ${empty ? "min-[900px]:justify-center min-[900px]:pb-16" : ""}`}>
+      <section className={`mx-auto flex min-h-0 w-full max-w-[640px] min-w-0 flex-1 flex-col min-[900px]:mx-0 min-[900px]:pt-6 ${empty ? "min-[900px]:justify-center min-[900px]:pb-16" : ""}`}>
+        {/* The one thing that scrolls. Its side padding gives card shadows room before the box clips them. */}
+        <div
+          ref={thread}
+          className={`-mx-5 flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain px-5 pb-3 sm:-mx-8 sm:px-8 min-[900px]:-mx-4 min-[900px]:px-4 ${empty ? "min-[900px]:flex-none" : ""}`}
+        >
         {/* On a wide, empty page the title introduces the room; otherwise Wally's bubble does. */}
         <div className={empty ? "sr-only min-[900px]:not-sr-only" : "sr-only"}>
           <h1 className="arrive font-display text-5xl font-bold tracking-[-0.025em]">Ask Wally</h1>
@@ -426,8 +466,9 @@ export function AskWally({
             </>
           )}
         </div>
+        </div>
 
-        <div className="dock sticky bottom-0 -mx-5 px-5 pt-3 pb-2.5 sm:-mx-8 sm:px-8 min-[900px]:mx-0 min-[900px]:px-0 min-[900px]:pb-4">
+        <div className="dock relative z-10 -mx-5 shrink-0 px-5 pt-3 pb-2.5 sm:-mx-8 sm:px-8 min-[900px]:mx-0 min-[900px]:px-0 min-[900px]:pb-4">
           {error && (
             <p role="alert" className="mb-2 rounded-xl border border-red/40 bg-red/5 p-3 text-[0.95rem] font-medium text-red">
               {error}

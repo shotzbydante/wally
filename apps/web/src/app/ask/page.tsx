@@ -74,12 +74,12 @@ async function Ask() {
   }
 
   return (
-    <>
+    <div className="room">
       <SignedInHeader
         active="/ask"
         text={wallyNumber ? { href: loaded.account.phone ? firstTextLink(wallyNumber, "") : "/account#texting", connected: Boolean(loaded.account.phone) } : undefined}
       />
       <AskWally name={loaded.account.name} initial={messages} ready={agentConfigured()} places={placesConfigured()} address={loaded.account.address ?? null} />
-    </>
+    </div>
   );
 }
