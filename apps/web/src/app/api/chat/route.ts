@@ -5,18 +5,19 @@ import { loadAccount } from "@/lib/server/accounts";
 import { beginTurn, clearMessages, loadMessages, saveReply, undoTurn } from "@/lib/server/conversation";
 import { DbError } from "@/lib/server/db";
 import { placesConfigured } from "@/lib/server/places";
-import { SESSION_COOKIE, sessionSecret } from "@/lib/server/session";
+import { SESSION_COOKIE, decodeSession, sessionSecret } from "@/lib/server/session";
 
 // A turn with web searches can take a while.
 export const maxDuration = 120;
 
 const json = (error: string, status: number) => NextResponse.json({ error }, { status });
 
+const tokenOf = (request: Request) =>
+  (request.headers.get("cookie") ?? "").split(/;\s*/).find((c) => c.startsWith(`${SESSION_COOKIE}=`))?.slice(SESSION_COOKIE.length + 1);
+
 /** The signed-in account, if it lives in the database. Chat needs one to keep the thread. */
 async function signedIn(request: Request) {
-  const header = request.headers.get("cookie") ?? "";
-  const token = header.split(/;\s*/).find((c) => c.startsWith(`${SESSION_COOKIE}=`))?.slice(SESSION_COOKIE.length + 1);
-  const loaded = await loadAccount(token, sessionSecret());
+  const loaded = await loadAccount(tokenOf(request), sessionSecret());
   if (loaded.state === "unavailable") return { error: json("unavailable", 503) };
   if (loaded.state !== "ok" || loaded.kept !== "database" || !loaded.account.id) return { error: json("signed_out", 401) };
   return { account: loaded.account, id: loaded.account.id };
@@ -34,11 +35,18 @@ function validTimeZone(value: unknown): string | undefined {
 
 /** The conversation so far. */
 export async function GET(request: Request) {
+  // The page asks for this every few seconds, so the thread is read alongside the account
+  // check, not after it. The id comes from the signed cookie; if the account turns out to
+  // be gone, the thread read is thrown away.
+  const secret = sessionSecret();
+  const id = secret ? decodeSession(tokenOf(request), secret)?.id : undefined;
+  const thread = id ? loadMessages(id) : null;
+  thread?.catch(() => {});
   const who = await signedIn(request);
   if ("error" in who) return who.error;
   try {
     return NextResponse.json({
-      messages: await loadMessages(who.id),
+      messages: await (thread ?? loadMessages(who.id)),
       // The address bar reads these, so it is right even on a page that was loaded a while ago.
       address: who.account.address ?? null,
       places: placesConfigured(),

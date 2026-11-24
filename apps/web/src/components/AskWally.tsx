@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type FormEvent, type KeyboardEvent } from "react";
+import { memo, useCallback, useEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type FormEvent, type KeyboardEvent } from "react";
 import { LocationBar } from "@/components/LocationBar";
 import { Wally } from "@/components/Wally";
 import { WallyFace, type WallyLook } from "@/components/WallyFace";
@@ -90,7 +90,15 @@ export function AskWally({
 
   // Messages can arrive from elsewhere (another device, and soon text), so
   // look again whenever the person comes back to this tab.
-  const refresh = useCallback(async (): Promise<ChatMessage[] | null> => {
+  // One read at a time: a slow read that a newer one has overtaken must not put an older thread back on the page.
+  const reading = useRef<Promise<ChatMessage[] | null> | null>(null);
+  const refresh = useCallback((): Promise<ChatMessage[] | null> => {
+    reading.current ??= read().finally(() => {
+      reading.current = null;
+    });
+    return reading.current;
+  }, []);
+  const read = async (): Promise<ChatMessage[] | null> => {
     try {
       const res = await fetch("/api/chat", { cache: "no-store" });
       if (!res.ok) return null;
@@ -105,7 +113,7 @@ export function AskWally({
     } catch {
       return null;
     }
-  }, []);
+  };
   /** The text of the person's latest stored message, after re-reading the thread. Null if it couldn't be read. */
   const latestUserMessage = useCallback(async () => {
     const list = await refresh();
@@ -232,6 +240,13 @@ export function AskWally({
     }
     input.current?.focus();
   };
+
+  // A way to send that keeps one identity, so stored messages aren't drawn again on every keystroke, streamed word or tick of Wally's face.
+  const sender = useRef(send);
+  useEffect(() => {
+    sender.current = send;
+  });
+  const say = useCallback((text: string) => void sender.current(text), []);
 
   const submit = (e: FormEvent) => {
     e.preventDefault();
@@ -389,13 +404,9 @@ export function AskWally({
             </ul>
           )}
 
-          {messages.map((m) =>
-            m.role === "user" ? (
-              <UserBubble key={m.id} text={m.content} byText={m.channel === "text"} />
-            ) : (
-              <WallyTurn key={m.id} text={m.content} at={m.created_at} byText={m.channel === "text"} choices={m.choices} live={m.id === lastId && !busy && ready} onPick={(c) => void send(c.reply)} onMore={() => void send("Show me 4 more")} onFastFood={() => void send(fastFoodAsk(m.choices))} onClosed={() => void send(CLOSED_ASK)} />
-            ),
-          )}
+          {messages.map((m) => (
+            <StoredMessage key={m.id} message={m} live={m.id === lastId && !busy && ready} say={say} />
+          ))}
 
           {pending && (
             <>
@@ -605,6 +616,15 @@ function UserBubble({ text, byText = false, fresh = false }: { text: string; byT
     </p>
   );
 }
+
+/** One message from the stored thread. Drawn again only when the message itself, or whether its options can still be picked, changes. */
+const StoredMessage = memo(function StoredMessage({ message: m, live, say }: { message: ChatMessage; live: boolean; say: (text: string) => void }) {
+  return m.role === "user" ? (
+    <UserBubble text={m.content} byText={m.channel === "text"} />
+  ) : (
+    <WallyTurn text={m.content} at={m.created_at} byText={m.channel === "text"} choices={m.choices} live={live} onPick={(c) => say(c.reply)} onMore={() => say("Show me 4 more")} onFastFood={() => say(fastFoodAsk(m.choices))} onClosed={() => say(CLOSED_ASK)} />
+  );
+});
 
 function WallyTurn({
   text,
