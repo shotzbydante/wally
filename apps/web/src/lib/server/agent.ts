@@ -390,7 +390,7 @@ function searchTool(guest: Guest): Anthropic.WebSearchTool20250305 {
   };
 }
 
-function guestNotes(guest: Guest, channel: Channel, now: Date): string {
+function guestNotes(guest: Guest, channel: Channel): string {
   const lines = ["# This guest"];
   lines.push(guest.name ? `- First name: ${guest.name}.` : "- You don't know their name yet.");
   if (guest.near) {
@@ -399,12 +399,20 @@ function guestNotes(guest: Guest, channel: Channel, now: Date): string {
     lines.push("- This can change between messages. Places from earlier in the conversation may be from somewhere else entirely: search afresh every time, never reuse them, and never pass area because of them.");
   }
   else lines.push(guest.zip ? `- Home ZIP code: ${guest.zip}. No saved address yet.` : "- They have no saved address, and you don't know where they are yet.");
-  if (guest.timeZone) {
-    const when = new Intl.DateTimeFormat("en-US", { weekday: "long", hour: "numeric", minute: "2-digit", timeZone: guest.timeZone }).format(now);
-    lines.push(`- Their local time: ${when}.`);
-  }
   lines.push(channel === "web" ? "- They are on the website right now." : "- They are texting right now. Keep it especially short.");
   return lines.join("\n");
+}
+
+/**
+ * The person's local time, as a note for Claude. It changes every minute, so
+ * it must not sit in the system prompt: anything that changes there throws
+ * away the cached thread behind it. It rides after the person's message
+ * instead (see withNote). Undefined when their time zone isn't known.
+ */
+export function timeNote(guest: Pick<Guest, "timeZone">, now: Date): string | undefined {
+  if (!guest.timeZone) return undefined;
+  const when = new Intl.DateTimeFormat("en-US", { weekday: "long", hour: "numeric", minute: "2-digit", timeZone: guest.timeZone }).format(now);
+  return `(Note from Wally's system, not from the person: their local time is ${when}.)`;
 }
 
 const clip = (value: unknown, max: number) => (typeof value === "string" ? value.trim().slice(0, max) : "");
@@ -468,6 +476,22 @@ export function withHistoryCache(messages: Anthropic.MessageParam[]): Anthropic.
   const cache = { cache_control: { type: "ephemeral" as const } };
   const content: Anthropic.ContentBlockParam[] = typeof last.content === "string" ? [{ type: "text", text: last.content, ...cache }] : last.content.map((block, i, all) => (i === all.length - 1 ? ({ ...block, ...cache } as Anthropic.ContentBlockParam) : block));
   return [...messages.slice(0, -1), { ...last, content } as Anthropic.MessageParam];
+}
+
+/**
+ * The same messages with a note added as a block of its own after the message
+ * at `index` (the person's newest). Apply it after withHistoryCache: the
+ * breakpoint then sits on the person's words and the note falls outside the
+ * cached part, so the next turn, which no longer carries this note, still
+ * reads the thread up to those words from the cache.
+ */
+export function withNote(messages: Anthropic.MessageParam[], index: number, note: string | undefined): Anthropic.MessageParam[] {
+  const target = messages[index];
+  if (!note || !target || target.role !== "user") return messages;
+  const content: Anthropic.ContentBlockParam[] = typeof target.content === "string" ? [{ type: "text", text: target.content }] : target.content;
+  const out = [...messages];
+  out[index] = { role: "user", content: [...content, { type: "text", text: note }] };
+  return out;
 }
 
 /**
@@ -629,6 +653,21 @@ export interface Listener {
   onSearch?: () => void;
 }
 
+/**
+ * How long one answer may take, all rounds and lookups together. The routes
+ * that call reply() are cut off by the host at 120 seconds, and a turn cut off
+ * there is neither saved nor taken back, so the agent stops itself first. No
+ * request to Claude runs past this; the slowest lookup that can follow one
+ * (the ordering service, 25 seconds) still ends inside the host's limit.
+ */
+const TURN_MS = 90_000;
+/** The least time worth starting another request to Claude with. */
+const MIN_ROUND_MS = 8000;
+
+/** One client for the life of the server instance, so its connections are reused between messages. It reads the key when first used. */
+let shared: Anthropic | null = null;
+const anthropic = () => (shared ??= new Anthropic({ maxRetries: 1, timeout: 90_000 }));
+
 export class AgentError extends Error {
   constructor(public reason: "not_configured" | "busy" | "failed") {
     super(reason);
@@ -641,9 +680,13 @@ export class AgentError extends Error {
  */
 export async function reply(thread: ChatMessage[], guest: Guest, channel: Channel, listener: Listener): Promise<Reply> {
   if (!agentConfigured()) throw new AgentError("not_configured");
-  const client = new Anthropic({ maxRetries: 1, timeout: 90_000 });
+  const client = anthropic();
+  const deadline = Date.now() + TURN_MS;
   const hasPlaces = placesConfigured();
   const messages = toClaudeMessages(thread);
+  // Fixed for the whole turn, so every round sends the same words and reads the last round from the cache.
+  const personTurn = messages.length - 1;
+  const note = timeNote(guest, new Date());
   const blocks: Anthropic.ContentBlock[] = [];
   const found = new Map<string, FoundPlace>();
   const shown = shownPlaces(thread);
@@ -936,23 +979,30 @@ export async function reply(thread: ChatMessage[], guest: Guest, channel: Channe
   try {
     let choices: Choice[] | null = null;
     let choicesInput: unknown = null;
+    // The same for every round of the turn.
+    const system: Anthropic.TextBlockParam[] = [
+      { type: "text", text: houseRules(hasPlaces, canOrder), cache_control: { type: "ephemeral" } },
+      { type: "text", text: guestNotes(guest, channel) },
+    ];
     for (let round = 0; round < MAX_ROUNDS; round++) {
+      const left = deadline - Date.now();
+      if (left < MIN_ROUND_MS) {
+        console.error(`[agent] out of time after ${round} round(s)`);
+        throw new AgentError("busy");
+      }
       const stream = client.messages.stream({
         model: model(),
         max_tokens: MAX_TOKENS,
         // A quick, conversational answer matters more here than long deliberation.
         output_config: { effort: "low" },
-        system: [
-          { type: "text", text: houseRules(hasPlaces, canOrder), cache_control: { type: "ephemeral" } },
-          { type: "text", text: guestNotes(guest, channel, new Date()) },
-        ],
+        system,
         // Places come from the places search when it is on. Web search is only the fallback
         // without it, so review and listing sites never appear beside real place cards.
         tools: [...(hasPlaces ? [FIND_PLACES_TOOL, SHOW_PLACES_TOOL] : [searchTool(guest)]), READ_MENU_TOOL, ...(canOrder ? [FIND_MENU_TOOL, ORDER_TICKET_TOOL, ...(hasPlaces ? [ORDERABLE_PLACES_TOOL] : [])] : []), CHOICES_TOOL],
         // One tool at a time: a search has to finish before options are shown.
         tool_choice: { type: "auto", disable_parallel_tool_use: true },
-        messages: withHistoryCache(messages),
-      });
+        messages: withNote(withHistoryCache(messages), personTurn, note),
+      }, { timeout: Math.min(90_000, left) });
       stream.on("streamEvent", (event) => {
         if (event.type === "content_block_start") {
           const block = event.content_block;
@@ -1069,6 +1119,10 @@ export async function reply(thread: ChatMessage[], guest: Guest, channel: Channe
     return { content: withSources(said, sources), choices };
   } catch (error) {
     if (error instanceof AgentError) throw error;
+    if (error instanceof Anthropic.APIConnectionTimeoutError) {
+      console.error("[agent] timed out");
+      throw new AgentError("busy");
+    }
     if (error instanceof Anthropic.APIError) {
       // Status and type only: enough to diagnose, nothing from the conversation.
       console.error(`[agent] ${error.status ?? "no status"} ${error.name}: ${error.message.slice(0, 200)}`);

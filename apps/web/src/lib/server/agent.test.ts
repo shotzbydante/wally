@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { asPlainText, asTexts, decodeCid, encodeCid, mapLinkFor, shortMapLink, textDeliveryLinks, isOwnSite, tidyLink, webNudgeDue, splitSources, withSources, type ChatMessage } from "@/lib/chat";
-import { describePlaces, readChoices, readWeb, toClaudeMessages, withHistoryCache, type FoundPlace } from "./agent";
+import { describePlaces, readChoices, readWeb, timeNote, toClaudeMessages, withHistoryCache, withNote, type FoundPlace } from "./agent";
 
 const message = (id: number, role: ChatMessage["role"], content: string, choices: ChatMessage["choices"] = null): ChatMessage => ({
   id,
@@ -217,5 +217,33 @@ describe("short map links", () => {
     expect(mapLinkFor("not a code!")).toBeNull();
     expect(mapLinkFor("")).toBeNull();
     expect(shortMapLink("https://maps.example/x", "https://wallywaiter.com")).toBe("maps.example/x");
+  });
+});
+
+describe("the local time note", () => {
+  const cache = { cache_control: { type: "ephemeral" } };
+  const now = new Date("2026-11-24T17:14:00Z");
+
+  it("is only written when the time zone is known", () => {
+    expect(timeNote({}, now)).toBeUndefined();
+    expect(timeNote({ timeZone: "America/Los_Angeles" }, now)).toContain("Tuesday 9:14");
+  });
+
+  it("rides after the person's words, outside the cached part", () => {
+    const thread = [{ role: "user" as const, content: "tacos" }];
+    expect(withNote(withHistoryCache(thread), 0, "note")).toEqual([{ role: "user", content: [{ type: "text", text: "tacos", ...cache }, { type: "text", text: "note" }] }]);
+    // Without a note nothing changes, so a texter's request is as before.
+    expect(withNote(thread, 0, undefined)).toBe(thread);
+  });
+
+  it("stays on the person's message in later rounds, where the breakpoint has moved on", () => {
+    const later = [
+      { role: "user" as const, content: "tacos" },
+      { role: "assistant" as const, content: [{ type: "tool_use" as const, id: "t1", name: "find_places", input: {} }] },
+      { role: "user" as const, content: [{ type: "tool_result" as const, tool_use_id: "t1", content: "[]" }] },
+    ];
+    const sent = withNote(withHistoryCache(later), 0, "note");
+    expect(sent[0]).toEqual({ role: "user", content: [{ type: "text", text: "tacos" }, { type: "text", text: "note" }] });
+    expect(sent[2]!.content).toEqual([{ type: "tool_result", tool_use_id: "t1", content: "[]", ...cache }]);
   });
 });
