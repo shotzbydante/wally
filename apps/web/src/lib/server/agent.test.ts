@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { asPlainText, asTexts, decodeCid, encodeCid, mapLinkFor, shortMapLink, textDeliveryLinks, isOwnSite, tidyLink, webNudgeDue, splitSources, withSources, type ChatMessage } from "@/lib/chat";
-import { describePlaces, namedSite, pickNamed, readChoices, sameSite, readWeb, timeNote, toClaudeMessages, withHistoryCache, withNote, type FoundPlace } from "./agent";
+import { describePlaces, isAt, namedSite, pickNamed, storeNames, readChoices, sameSite, readWeb, timeNote, toClaudeMessages, withHistoryCache, withNote, type FoundPlace } from "./agent";
 
 const message = (id: number, role: ChatMessage["role"], content: string, choices: ChatMessage["choices"] = null): ChatMessage => ({
   id,
@@ -249,9 +249,10 @@ describe("the local time note", () => {
 });
 
 describe("several places sharing a name", () => {
-  const fresno = { name: "Di Cicco's Italian Restaurant", website: "https://www.diciccosfresno.com/", miles: 2.1 };
-  const clovis = { name: "DiCicco's Italian Restaurant", website: "https://diciccos.com/clovis", miles: 6.4 };
-  const madera = { name: "DiCicco's", website: null, miles: 22 };
+  const fresno = { name: "Di Cicco's Italian Restaurant", address: "144 N Blackstone Ave, Fresno, CA 93701", website: "https://www.diciccosfresno.com/", miles: 2.1 };
+  const clovis = { name: "DiCicco's Italian Restaurant", address: "408 Clovis Ave, Clovis, CA 93612", website: "https://diciccos.com/clovis", miles: 6.4 };
+  const madera = { name: "DiCicco's", address: "516 S I St, Madera, CA 93637", website: null, miles: 22 };
+  const shields = { name: "DiCicco's Italian Restaurant - Shields", address: "6407 E Shields Ave, Fresno, CA 93727", website: "https://diciccos.com/", miles: 9 };
 
   it("reads a site the way a person types it", () => {
     expect(namedSite("DiCiccos.com")).toBe("https://DiCiccos.com");
@@ -277,15 +278,34 @@ describe("several places sharing a name", () => {
   });
 
   it("lets the site the person named decide, over the nearest", () => {
-    const { place, others, matched } = pickNamed([fresno, clovis, madera], "https://DiCiccos.com");
+    const { place, others, matched } = pickNamed([fresno, clovis, madera], { site: "https://DiCiccos.com" });
     expect(place).toBe(clovis);
     expect(others).toEqual([fresno, madera]);
     expect(matched).toBe(true);
   });
 
   it("says so when no place lists the site that was named", () => {
-    expect(pickNamed([fresno, madera], "https://diciccos.com")).toMatchObject({ place: fresno, matched: false });
-    expect(pickNamed([], "https://diciccos.com")).toEqual({ others: [], matched: false });
+    expect(pickNamed([fresno, madera], { site: "https://diciccos.com" })).toMatchObject({ place: fresno, matched: false });
+    expect(pickNamed([], { site: "https://diciccos.com" })).toEqual({ others: [], matched: false });
     expect(pickNamed([])).toEqual({ others: [], matched: true });
+  });
+
+  it("takes the street, town or branch the person picked over the nearest", () => {
+    expect(isAt(shields, "Shields")).toBe(true);
+    expect(isAt(shields, "the Shields Ave one")).toBe(true);
+    expect(isAt(clovis, "Shields")).toBe(false);
+    expect(isAt(clovis, "")).toBe(false);
+    expect(pickNamed([fresno, clovis, madera, shields], { where: "Shields" })).toMatchObject({ place: shields, matched: true });
+    expect(pickNamed([fresno, clovis, madera, shields], { where: "clovis" })).toMatchObject({ place: clovis, matched: true });
+    // Two on the named site: the street decides between them.
+    expect(pickNamed([fresno, clovis, shields], { site: "diciccos.com", where: "shields" }).place).toBe(shields);
+    // Nowhere by that street: the nearest, and it says it didn't match.
+    expect(pickNamed([fresno, clovis], { where: "Kingsburg" })).toMatchObject({ place: fresno, matched: false });
+  });
+
+  it("tries a store under its listed name, that name without the branch, and the person's words", () => {
+    expect(storeNames("DiCicco's Italian Restaurant - Shields", "DiCicco's")).toEqual(["DiCicco's Italian Restaurant - Shields", "DiCicco's Italian Restaurant", "DiCicco's"]);
+    expect(storeNames("Marlowe (Wilshire)", "Marlowe")).toEqual(["Marlowe (Wilshire)", "Marlowe"]);
+    expect(storeNames("Go Get Em Tiger", "Go Get Em Tiger")).toEqual(["Go Get Em Tiger"]);
   });
 });
