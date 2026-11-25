@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useSyncExternalStore } from "react";
+import { reportError } from "@/lib/analytics";
 
 const RELOADED_AT = "wally_reloaded_at";
 /** After reloading by itself once, wait this long before doing it again, so a page that keeps failing can't loop. */
@@ -35,6 +36,8 @@ export function Recover({ error }: { error: Error & { digest?: string } }) {
       const report = { message: String(error?.message ?? error).slice(0, 300), stack: String(error?.stack ?? "").split("\n").slice(0, 6).join("\n").slice(0, 900), digest: error?.digest, path: location.pathname };
       navigator.sendBeacon("/api/client-error", JSON.stringify(report));
     } catch {}
+    // And to analytics, where broken pages are counted and grouped.
+    reportError(error);
     if (reloadedRecently()) return;
     try {
       sessionStorage.setItem(RELOADED_AT, String(Date.now()));

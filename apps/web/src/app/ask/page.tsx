@@ -4,6 +4,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { connection } from "next/server";
 import { Suspense } from "react";
+import { AnalyticsUser } from "@/components/AnalyticsUser";
 import { AskWally } from "@/components/AskWally";
 import { Notice, noticeAction } from "@/components/Notice";
 import { SignedInHeader } from "@/components/SignedInHeader";
@@ -75,6 +76,7 @@ async function Ask() {
 
   return (
     <div className="room">
+      <AnalyticsUser id={loaded.account.id} email={Boolean(loaded.account.email)} google={Boolean(loaded.account.google)} phone={Boolean(loaded.account.phone)} address={Boolean(loaded.account.address)} />
       <SignedInHeader
         active="/ask"
         text={wallyNumber ? { href: loaded.account.phone ? firstTextLink(wallyNumber, "") : "/account#texting", connected: Boolean(loaded.account.phone) } : undefined}

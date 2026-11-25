@@ -84,13 +84,13 @@ export function LocationBar({ saved, onChange }: { saved: string | null; onChang
     typing.current = "";
   };
 
-  const request = async (method: "POST" | "DELETE", address?: string, here?: { lat: number; lng: number }) => {
+  const request = async (method: "POST" | "DELETE", address?: string, here?: { lat: number; lng: number }, refresh = false) => {
     setBusy(true);
     setError(null);
     try {
       const res = await fetch("/api/account/address", {
         method,
-        ...(address || here ? { headers: { "Content-Type": "application/json" }, body: JSON.stringify(here ? { here } : { address }) } : {}),
+        ...(address || here ? { headers: { "Content-Type": "application/json" }, body: JSON.stringify(here ? { here, ...(refresh ? { refresh } : {}) } : { address }) } : {}),
       });
       const data = (await res.json().catch(() => ({}))) as { address?: string; error?: string };
       if (!res.ok) setError(problems[data.error ?? ""] ?? problems.unavailable!);
@@ -112,7 +112,8 @@ export function LocationBar({ saved, onChange }: { saved: string | null; onChang
       setError(null);
     }
     navigator.geolocation.getCurrentPosition(
-      (at) => void request("POST", undefined, { lat: at.coords.latitude, lng: at.coords.longitude }),
+      // `quiet` is the look on arrival: the server saves it but doesn't count it as choosing a location.
+      (at) => void request("POST", undefined, { lat: at.coords.latitude, lng: at.coords.longitude }, quiet),
       (problem) => {
         if (quiet) return;
         setBusy(false);
@@ -145,7 +146,8 @@ export function LocationBar({ saved, onChange }: { saved: string | null; onChang
   const quiet = "press h-8 shrink-0 rounded-full px-3 text-[0.9rem] font-semibold text-ink-soft hover:text-ink disabled:opacity-50";
 
   return (
-    <div className="sticky top-12 z-20 bg-paper/95 backdrop-blur sm:top-[3.75rem]">
+    // ph-no-capture: taps in here would otherwise be recorded by analytics with the address they were on.
+    <div className="ph-no-capture sticky top-12 z-20 bg-paper/95 backdrop-blur sm:top-[3.75rem]">
       <div className="relative mx-auto w-full max-w-[1080px] px-5 py-2 sm:px-8">
         {/* With no address yet the bar is tinted and outlined, so it reads as the next thing to do. */}
         <div

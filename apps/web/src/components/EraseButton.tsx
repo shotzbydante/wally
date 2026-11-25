@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { forget } from "@/lib/analytics";
 
 /** Erasing can't be undone, so it takes a second, deliberate click. */
 export function EraseButton() {
@@ -15,7 +16,7 @@ export function EraseButton() {
     );
   }
   return (
-    <form action="/api/account/delete" method="post" className="flex flex-wrap gap-2">
+    <form action="/api/account/delete" method="post" onSubmit={forget} className="flex flex-wrap gap-2">
       <button type="button" onClick={() => setAsking(false)} autoFocus className={`${outline} border-line hover:border-ink`}>
         Keep it
       </button>

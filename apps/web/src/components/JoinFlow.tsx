@@ -3,6 +3,8 @@
 import Link from "next/link";
 import { useEffect, useId, useRef, useState, type CSSProperties, type FormEvent, type ReactNode } from "react";
 import { Wally } from "@/components/Wally";
+import { capture, identify } from "@/lib/analytics";
+import { ACCOUNT_HEADER } from "@/lib/analytics-shared";
 import {
   cleanFirstName,
   firstTextLink,
@@ -65,6 +67,11 @@ export function JoinFlow({ wallyNumber }: { wallyNumber: string | null }) {
     return () => clearTimeout(t);
   }, [resendIn]);
 
+  // Each step reached is one event, so the sign-up funnel shows where people stop.
+  useEffect(() => {
+    capture("join_step_viewed", { step, step_number: order.indexOf(step) + 1 });
+  }, [step]);
+
   const go = (next: Step) => {
     setErrors({});
     setStep(next);
@@ -83,7 +90,12 @@ export function JoinFlow({ wallyNumber }: { wallyNumber: string | null }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
-      if (res.ok) return null;
+      if (res.ok) {
+        // A verified code signs the person in: from here on, this visitor and that account are one person.
+        const account = res.headers.get(ACCOUNT_HEADER);
+        if (account) identify(account, { has_phone: true });
+        return null;
+      }
       const data = (await res.json().catch(() => ({}))) as { error?: string };
       return data.error ?? "provider_error";
     } catch {
@@ -111,9 +123,11 @@ export function JoinFlow({ wallyNumber }: { wallyNumber: string | null }) {
     const error = await post("/api/verify/start", details());
     setBusy(false);
     if (error) {
+      capture("join_failed", { step: "texts", error });
       setErrors({ form: problems[error] ?? problems.provider_error! });
       return false;
     }
+    capture("join_code_sent");
     setResendIn(RESEND_SECONDS);
     return true;
   };
@@ -131,7 +145,10 @@ export function JoinFlow({ wallyNumber }: { wallyNumber: string | null }) {
     const link = new URLSearchParams(window.location.search).get("link") === "1";
     const error = await post("/api/verify/check", { ...details(), code, link });
     setBusy(false);
-    if (error) return setErrors({ code: problems[error] ?? problems.provider_error! });
+    if (error) {
+      capture("join_failed", { step: "code", error });
+      return setErrors({ code: problems[error] ?? problems.provider_error! });
+    }
     go("ready");
   };
 

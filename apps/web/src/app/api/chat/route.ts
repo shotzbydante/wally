@@ -1,7 +1,8 @@
-import { NextResponse } from "next/server";
+import { NextResponse, after } from "next/server";
 import { MAX_MESSAGE_CHARS, type ChatEvent } from "@/lib/chat";
 import { AgentError, agentConfigured, reply } from "@/lib/server/agent";
 import { loadAccount } from "@/lib/server/accounts";
+import { answerShape, flushAnalytics, queryText, track, viaOf } from "@/lib/server/analytics";
 import { beginTurn, clearMessages, loadMessages, saveReply, undoTurn } from "@/lib/server/conversation";
 import { DbError } from "@/lib/server/db";
 import { placesConfigured } from "@/lib/server/places";
@@ -63,7 +64,7 @@ export async function POST(request: Request) {
   if (!request.headers.get("content-type")?.includes("application/json")) return json("invalid_input", 400);
   const who = await signedIn(request);
   if ("error" in who) return who.error;
-  const body = (await request.json().catch(() => null)) as { message?: unknown; timeZone?: unknown } | null;
+  const body = (await request.json().catch(() => null)) as { message?: unknown; timeZone?: unknown; via?: unknown } | null;
   const text = typeof body?.message === "string" ? body.message.trim() : "";
   if (!text || text.length > MAX_MESSAGE_CHARS) return json("invalid_input", 400);
   if (!agentConfigured()) return json("not_configured", 503);
@@ -76,8 +77,24 @@ export async function POST(request: Request) {
     throw error;
   }
   if (begun.status === "gone") return json("signed_out", 401);
-  if (begun.status === "limited") return json("limited", 429);
+  // Events are delivered once the answer has gone out, so they never hold it up.
+  after(flushAnalytics);
+  if (begun.status === "limited") {
+    track(who.id, "message_limited", { channel: "web" });
+    return json("limited", 429);
+  }
   const turn = begun;
+  const asked = Date.now();
+  track(who.id, "message_sent", {
+    channel: "web",
+    via: viaOf(body?.via),
+    ...queryText(text),
+    // The thread as Wally reads it, this message included: 1 means it opened the conversation.
+    thread_length: turn.messages.length,
+    has_address: Boolean(who.account.address),
+    $set: { uses_web: true, last_channel: "web", has_address: Boolean(who.account.address) },
+    $set_once: { first_channel: "web" },
+  });
   const guest = { id: who.id, name: who.account.name, zip: who.account.zip, near: who.account.near, address: who.account.address, timeZone: validTimeZone(body?.timeZone) };
 
   const encoder = new TextEncoder();
@@ -95,10 +112,16 @@ export async function POST(request: Request) {
           onSearch: () => send({ type: "searching" }),
         });
         const saved = await saveReply(who.id, "web", answer.content, answer.choices);
+        track(who.id, "wally_replied", { channel: "web", seconds: Math.round((Date.now() - asked) / 100) / 10, ...answerShape(answer.choices) });
         send(saved ? { type: "done", message: saved } : { type: "error", error: "signed_out" });
       } catch (error) {
         // Take the unanswered message back out of the thread; the page keeps the words to resend.
         await undoTurn(who.id, turn.id).catch(() => {});
+        track(who.id, "wally_failed", {
+          channel: "web",
+          reason: error instanceof AgentError ? error.reason : error instanceof DbError ? "unavailable" : "failed",
+          seconds: Math.round((Date.now() - asked) / 100) / 10,
+        });
         if (error instanceof AgentError) send({ type: "error", error: error.reason });
         else if (error instanceof DbError) send({ type: "error", error: "unavailable" });
         else {
@@ -122,6 +145,8 @@ export async function DELETE(request: Request) {
   if ("error" in who) return who.error;
   try {
     await clearMessages(who.id);
+    track(who.id, "conversation_cleared");
+    after(flushAnalytics);
     return NextResponse.json({ ok: true });
   } catch (error) {
     if (error instanceof DbError) return json("unavailable", 503);

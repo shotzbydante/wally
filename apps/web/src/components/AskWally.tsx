@@ -6,6 +6,7 @@ import { Wally } from "@/components/Wally";
 import { WallyFace, type WallyLook } from "@/components/WallyFace";
 import { CLOSED_ASK, MAX_MESSAGE_CHARS, OPEN_BADGE_MINUTES, asideOf, deliveryLinks, dollars, fastFoodAsk, hostOf, howFarParts, isOwnSite, offersClosed, offersFastFood, splitSources, visibleChoices, type ChatEvent, type ChatMessage, type Choice, type TicketInfo } from "@/lib/chat";
 import { SiteIcon } from "@/components/SiteIcon";
+import { capture, type Via } from "@/lib/analytics";
 
 /** What Wally is doing, which drives how he moves and what his bubble says. */
 type Mood = "idle" | "thinking" | "speaking" | "sorry";
@@ -194,7 +195,7 @@ export function AskWally({
     setDraft((current) => current || text);
   };
 
-  const send = async (raw: string) => {
+  const send = async (raw: string, via: Via = "typed") => {
     const text = raw.trim();
     if (!text || busy || !ready) return;
     if (text.length > MAX_MESSAGE_CHARS) return setError(problems.invalid_input!);
@@ -210,7 +211,7 @@ export function AskWally({
       res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: text, timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone }),
+        body: JSON.stringify({ message: text, timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone, via }),
       });
     } catch {
       return fail("network", text);
@@ -281,7 +282,7 @@ export function AskWally({
   useEffect(() => {
     sender.current = send;
   });
-  const say = useCallback((text: string) => void sender.current(text), []);
+  const say = useCallback((text: string, via: Via) => void sender.current(text, via), []);
 
   const submit = (e: FormEvent) => {
     e.preventDefault();
@@ -433,7 +434,7 @@ export function AskWally({
                 <li key={s.label} className="arrive" style={{ "--d": `${350 + i * 110}ms` } as CSSProperties}>
                   <button
                     type="button"
-                    onClick={() => void send(s.label)}
+                    onClick={() => void send(s.label, "starter")}
                     className="press card flex h-full w-full items-center gap-3 rounded-2xl bg-pad p-2.5 text-left font-semibold ring-1 ring-line transition-shadow ring-inset hover:ring-2 hover:ring-green"
                   >
                     <Tile>{s.emoji}</Tile>
@@ -559,6 +560,7 @@ function Ticket({ ticket: t, live }: { ticket: TicketInfo; live: boolean }) {
           href={t.checkoutUrl}
           target="_blank"
           rel="noopener noreferrer"
+          onClick={() => capture("pay_clicked", { total_cents: t.total, quantity: t.quantity })}
           className={`press fill-green flex h-11 items-center justify-center rounded-xl bg-green font-semibold text-white hover:brightness-110 ${live ? "" : "pointer-events-none opacity-60"}`}
         >
           Pay {dollars(t.total)} on the restaurant’s page
@@ -569,6 +571,9 @@ function Ticket({ ticket: t, live }: { ticket: TicketInfo; live: boolean }) {
     </div>
   );
 }
+
+/** A place card's link, named for analytics: where it leads, never the address itself. */
+const linkKind = (label: string) => ({ Website: "website", DoorDash: "doordash", "Uber Eats": "ubereats", Map: "map" })[label] ?? label.toLowerCase().replace(/\s+/g, "");
 
 /** Open or closed, rating and price: the facts about a place, from the listing, on one line. */
 function PlaceFacts({ place, fresh }: { place: NonNullable<Choice["place"]>; fresh: boolean }) {
@@ -659,11 +664,11 @@ function UserBubble({ text, byText = false, fresh = false }: { text: string; byT
 }
 
 /** One message from the stored thread. Drawn again only when the message itself, or whether its options can still be picked, changes. */
-const StoredMessage = memo(function StoredMessage({ message: m, live, say }: { message: ChatMessage; live: boolean; say: (text: string) => void }) {
+const StoredMessage = memo(function StoredMessage({ message: m, live, say }: { message: ChatMessage; live: boolean; say: (text: string, via: Via) => void }) {
   return m.role === "user" ? (
     <UserBubble text={m.content} byText={m.channel === "text"} />
   ) : (
-    <WallyTurn text={m.content} at={m.created_at} byText={m.channel === "text"} choices={m.choices} live={live} onPick={(c) => say(c.reply)} onMore={() => say("Show me 4 more")} onFastFood={() => say(fastFoodAsk(m.choices))} onClosed={() => say(CLOSED_ASK)} />
+    <WallyTurn text={m.content} at={m.created_at} byText={m.channel === "text"} choices={m.choices} live={live} onPick={(c, via = "card") => say(c.reply, via)} onMore={() => say("Show me 4 more", "more")} onFastFood={() => say(fastFoodAsk(m.choices), "fast_food")} onClosed={() => say(CLOSED_ASK, "closed")} />
   );
 });
 
@@ -687,7 +692,7 @@ function WallyTurn({
   writing?: boolean;
   /** Only the latest answer's options can still be picked. */
   live?: boolean;
-  onPick?: (choice: Choice) => void;
+  onPick?: (choice: Choice, via?: Via) => void;
   /** Asks Wally for the next four places. */
   onMore?: () => void;
   /** Asks for the fast-food and drive-thru kind of answer, around the same spot. */
@@ -749,7 +754,7 @@ function WallyTurn({
                 <p className="flex flex-wrap items-center gap-1.5 px-2.5 pb-2 text-[0.8rem] font-semibold text-green-deep">
                   {/* Ordering here leads when Wally can build the order; otherwise the restaurant's own site does. */}
                   {c.place.orders && (
-                    <button type="button" disabled={!live} onClick={() => onPick?.({ ...c, reply: `Order from ${c.title}` })} className={`press inline-flex h-7 items-center rounded-full px-2.5 transition-colors ${CHIP.lead}`}>
+                    <button type="button" disabled={!live} onClick={() => onPick?.({ ...c, reply: `Order from ${c.title}` }, "order")} className={`press inline-flex h-7 items-center rounded-full px-2.5 transition-colors ${CHIP.lead}`}>
                       Order with Wally<span className="sr-only"> from {c.title}</span>
                     </button>
                   )}
@@ -758,7 +763,7 @@ function WallyTurn({
                     ...deliveryLinks(c.title, c.place.website, c.place.apps).map((d) => ({ label: d.app, url: d.url, lead: false })),
                     { label: "Map", url: c.place.maps, lead: false },
                   ].map((link) => (
-                    <a key={link.label} href={link.url} target="_blank" rel="noopener noreferrer" className={`inline-flex h-7 items-center rounded-full px-2.5 transition-colors ${link.lead ? CHIP.lead : CHIP.plain}`}>
+                    <a key={link.label} href={link.url} target="_blank" rel="noopener noreferrer" onClick={() => capture("place_link_clicked", { kind: linkKind(link.label), own_site: link.lead, position: i + 1, orderable: Boolean(c.place?.orders), chain: Boolean(c.place?.chain) })} className={`inline-flex h-7 items-center rounded-full px-2.5 transition-colors ${link.lead ? CHIP.lead : CHIP.plain}`}>
                       {link.label}
                       <span className="sr-only"> for {c.title} (opens in a new tab)</span>
                     </a>
@@ -770,6 +775,7 @@ function WallyTurn({
                   href={c.url}
                   target="_blank"
                   rel="noopener noreferrer"
+                  onClick={() => capture("place_link_clicked", { kind: "web_result", own_site: false, position: i + 1, orderable: false, chain: false })}
                   className="flex items-center justify-between gap-2 border-t border-line px-3 py-2 text-[0.88rem] font-semibold text-green hover:bg-mint-wash"
                 >
                   <span className="truncate">{hostOf(c.url)}</span>

@@ -1,5 +1,7 @@
-import { NextResponse } from "next/server";
+import { NextResponse, after } from "next/server";
 import { signIn } from "@/lib/server/accounts";
+import { ACCOUNT_HEADER } from "@/lib/analytics-shared";
+import { flushAnalytics } from "@/lib/server/analytics";
 import { sessionSecret } from "@/lib/server/session";
 import { parseSignup } from "@/lib/server/signup-input";
 import { checkCode } from "@/lib/server/verify";
@@ -21,8 +23,10 @@ export async function POST(request: Request) {
 
   const res = NextResponse.json({ ok: true });
   // "link" comes from the account page: add this number to the signed-in account.
-  if (!(await signIn(res, request, input, secret, { link: body?.link === true, typed: true }))) {
-    return NextResponse.json({ error: "unavailable" }, { status: 503 });
-  }
+  const signedIn = await signIn(res, request, input, secret, { link: body?.link === true, typed: true, method: "phone" });
+  if (!signedIn) return NextResponse.json({ error: "unavailable" }, { status: 503 });
+  // The sign-up page reads this to tell analytics who the visitor turned out to be. It is their own account's id.
+  if (signedIn.id) res.headers.set(ACCOUNT_HEADER, signedIn.id);
+  after(flushAnalytics);
   return res;
 }

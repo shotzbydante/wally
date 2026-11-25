@@ -1,5 +1,6 @@
-import { NextResponse } from "next/server";
+import { NextResponse, after } from "next/server";
 import { claimSignInLink, signIn } from "@/lib/server/accounts";
+import { flushAnalytics } from "@/lib/server/analytics";
 import { DbError } from "@/lib/server/db";
 import { appOrigin, readToken, sessionFromRequest, sessionSecret } from "@/lib/server/session";
 
@@ -23,6 +24,7 @@ export async function GET(request: Request) {
   // when they opened it, fold that person's account into their own. Elsewhere it is a plain sign-in.
   const linkTo = link.link && sessionFromRequest(request, secret)?.id === link.link ? link.link : undefined;
   const res = NextResponse.redirect(link.link && !linkTo ? `${origin}/account?problem=link_elsewhere` : `${origin}/account`, 303);
-  if (!(await signIn(res, request, { email: link.email }, secret, { linkTo }))) return fail("unavailable");
+  if (!(await signIn(res, request, { email: link.email }, secret, { linkTo, method: "email" }))) return fail("unavailable");
+  after(flushAnalytics);
   return res;
 }

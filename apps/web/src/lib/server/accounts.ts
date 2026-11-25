@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import type { NextResponse } from "next/server";
+import { track } from "./analytics";
 import { DbError, dbConfigured, rpc } from "./db";
 import { decodeSession, sessionFromRequest, setSession, startSession, type Session } from "./session";
 
@@ -39,6 +40,8 @@ export interface AccountRow {
   phone: string | null;
   zip: string | null;
   suggestions: boolean;
+  /** When the account was made. The sign-in function returns the whole row, so this tells a sign-up from a sign-in. */
+  created_at?: string;
   // Absent until the address migration has been run.
   address?: string | null;
   lat?: number | null;
@@ -77,12 +80,36 @@ export interface SignInOptions {
   linkTo?: string;
   /** Name, ZIP and suggestions were typed by the person, so they replace what is stored. */
   typed?: boolean;
+  /** How the person proved who they are, for analytics. */
+  method?: SignInMethod;
+}
+
+export type SignInMethod = "phone" | "google" | "email";
+
+/** A row made in the last few seconds was made by this sign-in: the function returns straight after the insert. */
+const justCreated = (row: AccountRow, now = Date.now()) => {
+  const at = row.created_at ? Date.parse(row.created_at) : NaN;
+  return Number.isFinite(at) && Math.abs(now - at) < 15_000;
+};
+
+/** Which ways in an account has, as person properties. Never the email or the number themselves. */
+const signInTraits = (row: AccountRow) => ({ has_email: Boolean(row.email), has_google: row.google, has_phone: Boolean(row.phone) });
+
+/** Records a finished sign-in as a sign-up, a sign-in, or a method added to an account. */
+function trackSignIn(row: AccountRow, method: SignInMethod | undefined, link: string | null): void {
+  const added = link !== null && row.id === link;
+  const created = !added && justCreated(row);
+  track(row.id, created ? "signed_up" : added ? "sign_in_method_added" : "signed_in", {
+    method: method ?? "unknown",
+    $set: signInTraits(row),
+    ...(created ? { $set_once: { signup_method: method ?? "unknown", signed_up_at: row.created_at } } : {}),
+  });
 }
 
 /**
  * Finishes a sign-in: finds or creates the account and sets the session
- * cookie on `res`. False means the database couldn't be reached and nothing
- * was changed.
+ * cookie on `res`. Null means the database couldn't be reached and nothing
+ * was changed; otherwise the account's id, when it lives in the database.
  */
 export async function signIn(
   res: NextResponse,
@@ -90,19 +117,20 @@ export async function signIn(
   identity: Identity,
   secret: string,
   options: SignInOptions = {},
-): Promise<boolean> {
+): Promise<{ id?: string } | null> {
   const current = sessionFromRequest(request, secret);
   if (!dbConfigured()) {
     setSession(res, current, identity, secret);
-    return true;
+    return {};
   }
   const link = options.linkTo ?? (options.link ? current?.id : undefined) ?? null;
   try {
     const row = await signInRow(identity, link, options.typed === true);
     startSession(res, row.id, secret);
-    return true;
+    trackSignIn(row, options.method, link);
+    return { id: row.id };
   } catch (error) {
-    if (error instanceof DbError) return false;
+    if (error instanceof DbError) return null;
     throw error;
   }
 }
@@ -135,6 +163,7 @@ export async function linkPhone(accountId: string, phone: string): Promise<boole
   const [exists] = await rpc<AccountRow[]>("wally_account", { p_id: accountId });
   if (!exists) return false;
   const row = await signInRow({ phone }, accountId, false);
+  if (row.id === accountId) track(accountId, "phone_connected", { method: "connect_code", $set: signInTraits(row) });
   return row.id === accountId;
 }
 
