@@ -46,4 +46,4 @@ export function reportError(error: unknown): void {
 }
 
 /** How a message reached Wally: typed, or one of the taps that send words for the person. The server keeps the same list (`viaOf`). */
-export type Via = "typed" | "starter" | "card" | "order" | "more" | "fast_food" | "closed";
+export type Via = "typed" | "starter" | "card" | "order" | "more" | "fast_food" | "closed" | "discover";

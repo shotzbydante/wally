@@ -9,6 +9,7 @@ import { AskWally } from "@/components/AskWally";
 import { Notice, noticeAction } from "@/components/Notice";
 import { SignedInHeader } from "@/components/SignedInHeader";
 import type { ChatMessage } from "@/lib/chat";
+import { ideaById } from "@/lib/discover";
 import { loadAccount } from "@/lib/server/accounts";
 import { agentConfigured } from "@/lib/server/agent";
 import { loadMessages } from "@/lib/server/conversation";
@@ -19,15 +20,17 @@ import { firstTextLink } from "@/lib/signup";
 
 export const metadata: Metadata = { title: "Ask Wally" };
 
-export default function AskPage() {
+type Query = Promise<{ start?: string | string[] }>;
+
+export default function AskPage({ searchParams }: { searchParams: Query }) {
   return (
     <Suspense fallback={<p className="p-8 text-ink-soft">Wally is on his way over…</p>}>
-      <Ask />
+      <Ask searchParams={searchParams} />
     </Suspense>
   );
 }
 
-async function Ask() {
+async function Ask({ searchParams }: { searchParams: Query }) {
   // Read the cookie first: this is what makes the page render per request.
   const token = (await cookies()).get(SESSION_COOKIE)?.value;
   // Checking the session's expiry reads the clock, which needs a real request.
@@ -74,6 +77,9 @@ async function Ask() {
     );
   }
 
+  // An idea tapped on the Discover tab: its first message is sent for the person. Only ids on that list count.
+  const start = ideaById((await searchParams).start)?.ask;
+
   return (
     <div className="room">
       <AnalyticsUser id={loaded.account.id} email={Boolean(loaded.account.email)} google={Boolean(loaded.account.google)} phone={Boolean(loaded.account.phone)} address={Boolean(loaded.account.address)} />
@@ -81,7 +87,7 @@ async function Ask() {
         active="/ask"
         text={wallyNumber ? { href: loaded.account.phone ? firstTextLink(wallyNumber, "") : "/account#texting", connected: Boolean(loaded.account.phone) } : undefined}
       />
-      <AskWally name={loaded.account.name} initial={messages} ready={agentConfigured()} places={placesConfigured()} address={loaded.account.address ?? null} />
+      <AskWally name={loaded.account.name} initial={messages} ready={agentConfigured()} places={placesConfigured()} address={loaded.account.address ?? null} start={start} />
     </div>
   );
 }

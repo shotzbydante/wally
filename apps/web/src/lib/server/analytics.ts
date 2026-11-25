@@ -100,7 +100,7 @@ export function queryText(text: string): Properties {
 }
 
 /** How a message reached Wally from the website: typed, or one of the taps that send words for the person. */
-const VIA = ["typed", "starter", "card", "order", "more", "fast_food", "closed"] as const;
+const VIA = ["typed", "starter", "card", "order", "more", "fast_food", "closed", "discover"] as const;
 export const viaOf = (value: unknown): (typeof VIA)[number] => VIA.find((v) => v === value) ?? "typed";
 
 /** The shape of Wally's answer, in counts. Never what it said. */
