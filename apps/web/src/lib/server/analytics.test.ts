@@ -32,6 +32,7 @@ describe("analytics", () => {
   it("only accepts the ways of sending it knows", () => {
     expect(viaOf("starter")).toBe("starter");
     expect(viaOf("fast_food")).toBe("fast_food");
+    expect(viaOf("discover")).toBe("discover");
     expect(viaOf("<script>")).toBe("typed");
     expect(viaOf(undefined)).toBe("typed");
   });

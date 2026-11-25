@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { memo, useCallback, useEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type FormEvent, type KeyboardEvent } from "react";
 import { LocationBar } from "@/components/LocationBar";
 import { Wally } from "@/components/Wally";
@@ -7,6 +8,7 @@ import { WallyFace, type WallyLook } from "@/components/WallyFace";
 import { CLOSED_ASK, MAX_MESSAGE_CHARS, OPEN_BADGE_MINUTES, asideOf, deliveryLinks, dollars, fastFoodAsk, hostOf, howFarParts, isOwnSite, linkParts, offersClosed, offersFastFood, splitSources, visibleChoices, type ChatEvent, type ChatMessage, type Choice, type TicketInfo } from "@/lib/chat";
 import { SiteIcon } from "@/components/SiteIcon";
 import { capture, type Via } from "@/lib/analytics";
+import { ideaFor } from "@/lib/discover";
 
 /** What Wally is doing, which drives how he moves and what his bubble says. */
 type Mood = "idle" | "thinking" | "speaking" | "sorry";
@@ -48,6 +50,7 @@ export function AskWally({
   ready,
   places: placesAtLoad,
   address: addressAtLoad,
+  start,
 }: {
   name: string;
   initial: ChatMessage[];
@@ -55,6 +58,8 @@ export function AskWally({
   /** The places search is switched on, so an address is worth asking for. */
   places: boolean;
   address: string | null;
+  /** A first message to send on arrival: an idea tapped on the Discover tab. */
+  start?: string;
 }) {
   const [messages, setMessages] = useState(initial);
   const [places, setPlaces] = useState(placesAtLoad);
@@ -122,10 +127,12 @@ export function AskWally({
     return list ? (list.filter((m) => m.role === "user").pop()?.content ?? "") : null;
   }, [refresh]);
   // And once on arrival: a page opened before a change went live should still catch up.
+  // Not when arriving to send an idea: the thread was just read, and a read landing after the answer would hide it until the next poll.
   useEffect(() => {
+    if (start) return;
     const soon = setTimeout(() => void refresh(), 0);
     return () => clearTimeout(soon);
-  }, [refresh]);
+  }, [refresh, start]);
   useEffect(() => {
     const onReturn = () => {
       if (document.visibilityState === "visible" && !busy) void refresh();
@@ -283,6 +290,15 @@ export function AskWally({
     sender.current = send;
   });
   const say = useCallback((text: string, via: Via) => void sender.current(text, via), []);
+
+  // Arriving from Discover: send the idea's message once, and take it out of the address so a reload doesn't send it again.
+  const started = useRef(false);
+  useEffect(() => {
+    if (!start || started.current) return;
+    started.current = true;
+    window.history.replaceState(null, "", "/ask");
+    if (ready) void sender.current(start, "discover");
+  }, [start, ready]);
 
   const submit = (e: FormEvent) => {
     e.preventDefault();
@@ -442,6 +458,11 @@ export function AskWally({
                   </button>
                 </li>
               ))}
+              <li className="arrive text-center sm:col-span-2" style={{ "--d": `${350 + starters.length * 110}ms` } as CSSProperties}>
+                <Link href="/discover" className="inline-flex h-9 items-center gap-1 rounded-full px-3 text-[0.95rem] font-semibold text-green-deep underline-offset-4 hover:underline">
+                  See everything I can do
+                </Link>
+              </li>
             </ul>
           )}
 
@@ -671,12 +692,26 @@ function Said({ text }: { text: string }) {
 }
 
 function UserBubble({ text, byText = false, fresh = false }: { text: string; byText?: boolean; fresh?: boolean }) {
-  return (
+  // A message that is a Discover idea's first message carries the idea's card above it, the way it was tapped (a starter with the same words gets it too).
+  const idea = byText ? undefined : ideaFor(text);
+  const bubble = (
     <p className={`ml-auto max-w-[85%] rounded-[1.35rem] rounded-br-md fill-green bg-green px-4 py-2 break-words whitespace-pre-wrap text-white ${fresh ? "sent-mine" : ""}`}>
       <span className="sr-only">You: </span>
       {text}
       {byText && <ByText />}
     </p>
+  );
+  if (!idea) return bubble;
+  return (
+    <div className="flex flex-col items-end gap-1">
+      <div className={`card flex max-w-[85%] items-center gap-3 rounded-[1.35rem] rounded-br-md bg-pad py-2.5 pr-4 pl-2.5 ring-1 ring-line ring-inset ${fresh ? "sent-mine" : ""}`}>
+        <span className="plate plate-sm shrink-0" aria-hidden="true">
+          <span>{idea.emoji}</span>
+        </span>
+        <span className="min-w-0 text-[0.95rem] leading-snug font-semibold">{idea.title}</span>
+      </div>
+      {bubble}
+    </div>
   );
 }
 
