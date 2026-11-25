@@ -88,8 +88,9 @@ const ORDERING = `# Ordering (restaurants that take orders through Square)
 - You can build a pickup order at some restaurants and hand the person a page to pay on. The person pays the restaurant directly; you never take payment.
 - find_orderable_places lists the nearest restaurants where you can build a pickup order, with no cuisine filter; show all of its ids with show_places. For a cuisine, use find_places instead and read can_order.
 - The location set on the page (their saved address, or the current location they are sharing) is where "near me" is, wherever they live or whatever ZIP their account holds: someone traveling is served where they are. Never ask for a ZIP when a location is set: ordering works from it on its own. Ask for one only if a tool result tells you to, and never answer a request with a question about ZIPs otherwise.
-- When someone says "Order from <place>" without a dish, ask in one short line what they'd like there; you have no menu until find_menu runs with a dish.
+- When someone says "Order from <place>" without a dish, call find_menu with no dish: it returns some of what's on its menu. Offer three or four by name and price and ask what they'd like.
 - When someone wants to order something, call find_menu with the restaurant's name and the dish in their words. It tells you whether the place takes orders this way, and lists matching menu items with their prices and the choices each one needs (a base, a protein, a size).
+- When you call find_menu, always give also: two to four other names the menu might use for the dish. Never ask the person what to call a dish or to guess its name on the menu: if find_menu shows other items instead (matched_what_was_asked false), offer the closest by name and price; if it finds nothing, give how_to_order. Each dish in a multi-item order is its own find_menu call and its own ticket.
 - Every request to order something calls find_menu first, even at a place you answered about earlier in this conversation: your own earlier answers are not a check (they may come from before a change, or be about another location), and read_menu never decides it. A check that finds nothing costs nothing.
 - Whether you can build an order is decided location by location, and only find_menu knows. When a name has several locations and the person says or picks one ("Shields is closest"), call find_menu again with that location in where before saying anything about ordering there. Never say you can't build an order at a location find_menu hasn't been asked about, and never carry a "not set up" answer from one location over to another.
 - If find_menu answers for a different location than the one asked (not_the_location_asked), say which location you can order from and ask whether that one works; don't build a ticket until they say yes.
@@ -229,17 +230,23 @@ const SHOW_PLACES_TOOL: Anthropic.Tool = {
 const FIND_MENU_TOOL: Anthropic.Tool = {
   name: "find_menu",
   description:
-    "Finds a restaurant that takes orders through Square near the person and searches its menu. Returns the matching place (or that none takes orders this way) and up to eight menu items with id, price and the required choices (each with option ids). Call it before order_ticket.",
+    "Finds a restaurant that takes orders through Square near the person and searches its menu under the dish and the other names in also. Returns the matching place (or that none takes orders this way) and up to eight menu items with id, price and the required choices (each with option ids). Call it before order_ticket.",
   input_schema: {
     type: "object",
     properties: {
       restaurant: { type: "string", description: "The restaurant's name, as the person said it or as it appears on a place card." },
-      dish: { type: "string", description: "What they want, in a few words: 'poke bowl', 'pepperoni pizza', 'latte'." },
+      dish: { type: "string", description: "What they want, in a few words: 'poke bowl', 'pepperoni pizza', 'latte'. Leave it out when they haven't said (\"Order from Stara\"): you get some of what's on its menu to offer." },
+      also: {
+        type: "array",
+        items: { type: "string" },
+        maxItems: 4,
+        description: "With a dish: two to four other names this restaurant's menu might use for the same thing, all searched at once: its own cuisine's word or a broader one (\"kielbasa\", \"sausage plate\" for a polish sausage; \"cold brew\", \"coffee\" for an iced coffee; \"soda\", \"fountain drink\" for a Coke; \"bottled water\" for water). The search matches words, not meaning, so always give some.",
+      },
       zip: { type: "string", description: "A 5-digit ZIP the person typed in this conversation. Leave it out when they have a saved address or are sharing their location; the search works from that." },
       website: { type: "string", description: "The restaurant's own site, only when the person named one. It picks the right place when several share the name." },
       where: { type: "string", description: "Which location, when the name has several and the person said or picked one: its street, town or branch in a word or two (\"Shields\", \"Old Town Clovis\", \"Blackstone\"). Leave it out otherwise." },
     },
-    required: ["restaurant", "dish"],
+    required: ["restaurant"],
   },
 };
 
@@ -320,6 +327,31 @@ const ORDER_TICKET_TOOL: Anthropic.Tool = {
 export type MenuFound = MenuSnapshot;
 
 /** Builds the menu Claude is shown from what the connector returned: dine-in-only items are left out. */
+/** The words a menu search tries for one dish: the person's own, then up to four other names Claude gave, each once. */
+export function menuTerms(dish: string, also: unknown): string[] {
+  const more = Array.isArray(also) ? also.filter((a): a is string => typeof a === "string") : [];
+  const seen = new Set<string>();
+  return [dish, ...more.slice(0, 4)]
+    .map((t) => t.replace(/\s+/g, " ").trim().slice(0, 40))
+    .filter((t) => t && !seen.has(t.toLowerCase()) && (seen.add(t.toLowerCase()), true));
+}
+
+/** Words that don't help find a dish on a menu. */
+const NOT_A_DISH = new Set(["the", "and", "restaurant", "cafe", "café", "kitchen", "grill", "bar", "house", "eatery", "company", "co", "inc", "llc", "shop", "place", "spot", "food", "foods", "express", "original", "famous"]);
+
+/**
+ * When nothing matched what the person asked for, the words of the
+ * restaurant's own name are the next best search: "Stara Pierogi & Sausage"
+ * sells pierogi and sausage under whatever names it uses. Up to three.
+ */
+export function nameTerms(...names: string[]): string[] {
+  const out: string[] = [];
+  for (const name of names)
+    for (const word of name.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z ]/g, " ").split(/\s+/))
+      if (word.length > 3 && !NOT_A_DISH.has(word) && !out.includes(word)) out.push(word);
+  return out.slice(0, 3);
+}
+
 export function menuFound(venue: Venue, entries: MenuEntry[]): MenuFound {
   const found: MenuFound = { venue, items: {}, options: {}, age: 0 };
   entries
@@ -1006,11 +1038,14 @@ export async function reply(thread: ChatMessage[], guest: Guest, channel: Channe
    * of dozen at most and a named place is usually not among them.
    */
   const findMenu = async (input: unknown): Promise<{ content: string; is_error?: boolean }> => {
-    const args = (input ?? {}) as { restaurant?: unknown; dish?: unknown; zip?: unknown; website?: unknown; where?: unknown };
+    const args = (input ?? {}) as { restaurant?: unknown; dish?: unknown; also?: unknown; zip?: unknown; website?: unknown; where?: unknown };
     const spot = clip(args.where, 60) || undefined;
     const restaurant = clip(args.restaurant, 80);
     const dish = clip(args.dish, 80);
-    if (!restaurant || !dish) return { content: "Give the restaurant and the dish.", is_error: true };
+    if (!restaurant) return { content: "Give the restaurant.", is_error: true };
+    // No dish ("Order from Stara", from a card's Order with Wally chip): show what's on the menu, found under the restaurant's own words.
+    const browsing = !dish;
+    const firstQuery = dish || nameTerms(restaurant)[0] || "menu";
     if (!ordering) return { content: "Ordering isn't switched on.", is_error: true };
     const zip = await orderingZip(args.zip);
     if (!zip && !guest.near && !placesConfigured()) {
@@ -1032,7 +1067,7 @@ export async function reply(thread: ChatMessage[], guest: Guest, channel: Channe
         // One location in the ordering directory. A miss costs nothing but about five seconds; a hit is billed. So the listing's own name goes first and alone (where a place is in the directory, that usually finds it and is the only call), and only after a miss the other names it may be filed under, together.
         const lookAt = (p: FoundPlace, name: string) => {
           const street = streetOf(p.address);
-          return street ? ordering.lookup!({ name, address: street }, dish) : Promise.resolve(null);
+          return street ? ordering.lookup!({ name, address: street }, firstQuery) : Promise.resolve(null);
         };
         const tryAt = async (p: FoundPlace) => {
           const [first, ...rest] = storeNames(p.name, restaurant);
@@ -1069,12 +1104,63 @@ export async function reply(thread: ChatMessage[], guest: Guest, channel: Channe
         const names = stores.slice(0, 6).map((s) => s.name);
         return { content: JSON.stringify({ ...about, takes_orders: false, ...howToOrder, note: "This restaurant isn't set up for ordering through Wally (it isn't in the ordering directory Wally can build carts from). Say so in a few words, then give the ways in how_to_order: its own site as a bare address, and its phone number as written. Never say it doesn't take orders at all.", nearby_that_do: names }) };
       }
-      entries ??= await ordering.menu(store.id, dish);
-      menu = menuFound(store, entries);
+      // The menu search matches words, not meaning: "sausage" found nothing at Stara Pierogi & Sausage, whose menu calls it something else.
+      // So every name for the dish is searched at once (a search that finds nothing isn't billed; one that does is, about ten cents),
+      // and when none of them match, the words of the restaurant's own name, so the person sees what is there instead of being asked to guess.
+      const venue = store;
+      const tried = new Set<string>();
+      const found = new Map<string, MenuEntry>();
+      const keep = (list: MenuEntry[]) => list.forEach((e) => found.has(e.itemId) || found.set(e.itemId, e));
+      const search = async (terms: string[]) => {
+        const fresh = terms.filter((t) => !tried.has(t.toLowerCase()));
+        fresh.forEach((t) => tried.add(t.toLowerCase()));
+        const lists = await Promise.all(
+          fresh.map((t) =>
+            ordering.menu(venue.id, t).catch((error: unknown) => {
+              if (isConnectorError(error)) return [] as MenuEntry[];
+              throw error;
+            }),
+          ),
+        );
+        lists.forEach(keep);
+        return fresh.map((t, i) => `${t}(${lists[i]!.length})`);
+      };
+      if (entries) {
+        keep(entries);
+        tried.add(firstQuery.toLowerCase());
+      }
+      const asked = menuTerms(dish, args.also);
+      const log = [...(entries ? [`${firstQuery}(${entries.length})`] : []), ...(await search(asked))];
+      const fellBack = found.size === 0 || (browsing && found.size < 4);
+      if (fellBack) log.push(...(await search(nameTerms(venue.name, restaurant))));
+      console.log(`[order] menu at ${venue.name}: ${log.join(", ")}${fellBack ? " (none matched what was asked; searched the restaurant's name)" : ""}`);
+      entries = [...found.values()].slice(0, 24);
+      menu = menuFound(venue, entries);
       menuUsed = true;
       const dineInOnly = entries.length - Object.keys(menu.items).length;
       if (!Object.keys(menu.items).length) {
-        return { content: JSON.stringify({ restaurant: store.name, takes_orders: true, items: [], note: dineInOnly ? "The matching items are for dining in only, not pickup. Say so, and offer another dish." : "Nothing on the menu matched those words. Call find_menu again with one or two other words the menu might use (\"cold brew\" or \"coffee\" for an iced coffee; \"latte\" for a drink with milk); after a second miss, say what you looked for and ask what they'd like to call it." }) };
+        // Nothing to order here by any name: say what was looked for, and how they can order it themselves by name.
+        const listing = placesConfigured() ? pickNamed(await placesNamed(restaurant), {}).place : undefined;
+        return {
+          content: JSON.stringify({
+            restaurant: venue.name,
+            takes_orders: true,
+            items: [],
+            searched_for: [...tried],
+            ...howToOrderFor(listing),
+            note: dineInOnly
+              ? "The matching items are for dining in only, not pickup. Say so, and offer another dish or the ways in how_to_order."
+              : "Nothing on its orderable menu came up under any of those names, or under the restaurant's own name. Don't ask the person what to call it. Say in a few words that you couldn't find it on the menu you can order from, then give the ways in how_to_order so they can order it by name: the site as a bare address, the phone number as written.",
+          }),
+        };
+      }
+      if (browsing) {
+        const described = JSON.parse(describeMenu(menu)) as Record<string, unknown>;
+        return { content: JSON.stringify({ ...described, note: "No dish was named. These are some things on its menu you can order through Wally (not all of it). Offer three or four by name and price and ask what they'd like; build no ticket until they pick." }) };
+      }
+      if (fellBack) {
+        const described = JSON.parse(describeMenu(menu)) as Record<string, unknown>;
+        return { content: JSON.stringify({ ...described, matched_what_was_asked: false, searched_for: asked, note: `Nothing matched ${asked.map((t) => `"${t}"`).join(" or ")}. These are other things on its menu. Offer the two or three closest to what they asked for, by name and price, and ask which they'd like; build no ticket until they pick.` }) };
       }
       return { content: describeMenu(menu) };
     } catch (error) {
