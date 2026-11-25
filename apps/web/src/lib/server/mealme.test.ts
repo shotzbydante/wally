@@ -195,7 +195,7 @@ describe("ordering in the agent", () => {
     expect(visibleChoices(message(0).choices)).toEqual([]);
     expect(asTexts(message(0), "https://wallywaiter.com")).toEqual(["Which protein?"]);
     // Claude reads it back with the ids he needs.
-    expect(asPlainText(message(0))).toBe("Which protein?\nMenu at Poke Bar Los Angeles (order_ticket takes these ids): m1 Small Poke Bowl $15.49 [Base Choice (pick 1-2): o1 White Rice, o2 Brown Rice; Protein (pick 1): o3 Salmon, o4 Tuna +$1.50]");
+    expect(asPlainText(message(0))).toBe("Which protein?\n[Wally's own notes, never shown to the person; don't repeat them] Menu at Poke Bar Los Angeles (order_ticket takes these ids): m1 Small Poke Bowl $15.49 [Base Choice (pick 1-2): o1 White Rice, o2 Brown Rice; Protein (pick 1): o3 Salmon, o4 Tuna +$1.50]");
     expect(menuLines(found as MenuSnapshot)).toContain("o4 Tuna +$1.50");
   });
   it("writes the ticket as text, for history and for a phone", () => {
