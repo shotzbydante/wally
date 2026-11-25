@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { asPlainText, asTexts, linkParts, decodeCid, encodeCid, mapLinkFor, shortMapLink, textDeliveryLinks, isOwnSite, tidyLink, webNudgeDue, splitSources, withSources, type ChatMessage } from "@/lib/chat";
-import { describePlaces, isAt, namedSite, pickNamed, storeNames, readChoices, sameSite, readWeb, timeNote, toClaudeMessages, withHistoryCache, withNote, type FoundPlace } from "./agent";
+import { describePlaces, isAt, menuTerms, nameTerms, namedSite, pickNamed, storeNames, readChoices, sameSite, readWeb, timeNote, toClaudeMessages, withHistoryCache, withNote, type FoundPlace } from "./agent";
 
 const message = (id: number, role: ChatMessage["role"], content: string, choices: ChatMessage["choices"] = null): ChatMessage => ({
   id,
@@ -331,5 +331,20 @@ describe("tappable sites and phone numbers in Wally's words", () => {
     for (const plain of ["Two pizzas for $25.99, ready by 7.", "Write to hello@diciccos.com", "Open 11 to 9. Closed Monday.", "Calories: 1200-1450"]) {
       expect(linkParts(plain).some((p) => p.href)).toBe(false);
     }
+  });
+});
+
+describe("the words a menu search tries", () => {
+  it("tries the dish and the other names given, each once", () => {
+    expect(menuTerms("polish sausage", ["Kielbasa", "sausage plate", "kielbasa", 4, "  sausage   "])).toEqual(["polish sausage", "Kielbasa", "sausage plate", "sausage"]);
+    expect(menuTerms("latte", undefined)).toEqual(["latte"]);
+    expect(menuTerms("", ["coffee"])).toEqual(["coffee"]);
+    expect(menuTerms("a", ["b", "c", "d", "e", "f"])).toHaveLength(5);
+  });
+
+  it("falls back to the words of the restaurant's own name", () => {
+    expect(nameTerms("Stara Pierogi & Sausage", "stara")).toEqual(["stara", "pierogi", "sausage"]);
+    expect(nameTerms("The Poke Bar Kitchen")).toEqual(["poke"]);
+    expect(nameTerms("Café Dulcé Bakery")).toEqual(["dulce", "bakery"]);
   });
 });
