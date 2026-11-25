@@ -90,9 +90,10 @@ const ORDERING = `# Ordering (restaurants that take orders through Square)
 - The location set on the page (their saved address, or the current location they are sharing) is where "near me" is, wherever they live or whatever ZIP their account holds: someone traveling is served where they are. Never ask for a ZIP when a location is set: ordering works from it on its own. Ask for one only if a tool result tells you to, and never answer a request with a question about ZIPs otherwise.
 - When someone says "Order from <place>" without a dish, ask in one short line what they'd like there; you have no menu until find_menu runs with a dish.
 - When someone wants to order something, call find_menu with the restaurant's name and the dish in their words. It tells you whether the place takes orders this way, and lists matching menu items with their prices and the choices each one needs (a base, a protein, a size).
+- Every request to order something calls find_menu first, even at a place you answered about earlier in this conversation: your own earlier answers are not a check (they may come from before a change, or be about another location), and read_menu never decides it. A check that finds nothing costs nothing.
 - Whether you can build an order is decided location by location, and only find_menu knows. When a name has several locations and the person says or picks one ("Shields is closest"), call find_menu again with that location in where before saying anything about ordering there. Never say you can't build an order at a location find_menu hasn't been asked about, and never carry a "not set up" answer from one location over to another.
 - If find_menu answers for a different location than the one asked (not_the_location_asked), say which location you can order from and ask whether that one works; don't build a ticket until they say yes.
-- If the place isn't set up for ordering through you, don't stop at "I can't". Say so in a few words, then give the two ways they can order right now, from how_to_order in the result: online on the restaurant's own site, written as its bare address (diciccos.com), and by phone, with the number exactly as given. Write both into your sentence so they can be tapped; this is the one place a site address and a phone number belong in your words. If you already listed what they want, name the dishes so they can read the order out. If the result has no site or no number, give the one it has, or the delivery apps on its card when it has neither. Never invent a site or a number, never say the place doesn't take orders at all (it may, on its own site or by phone), and never pretend to order anywhere else.
+- If the place isn't set up for ordering through you, don't stop at "I can't". Say so in a few words, then give the two ways they can order right now, from how_to_order in the result (find_menu's, or read_menu's when you read the menu): online on the restaurant's own site, written as its bare address (diciccos.com), and by phone, with the number exactly as given. Write both into your sentence so they can be tapped; this is the one place a site address and a phone number belong in your words. If you already listed what they want, name the dishes so they can read the order out. If the result has no site or no number, give the one it has, or the delivery apps on its card when it has neither. Never invent a site or a number, never say the place doesn't take orders at all (it may, on its own site or by phone), and never pretend to order anywhere else.
 - Before building the order, you must know every required choice. Ask for the ones the person hasn't given, in one message, offering the options by name. Don't guess a protein or a base.
 - A menu you read in one of your last few answers stays ready: it appears in your own earlier turn as a "Menu at …" line with its item and option ids. When the person answers your question, call order_ticket with those ids straight away; don't call find_menu again for the same place and dish (each read costs money) unless order_ticket says the menu is gone.
 - Only pickup items are listed. If find_menu says the dish is for dining in only, say so and offer another.
@@ -932,6 +933,13 @@ export async function reply(thread: ChatMessage[], guest: Guest, channel: Channe
     };
   };
 
+  /** How the person can order on their own: the restaurant's site and its phone, from its listing. Empty when the listing has neither. */
+  const howToOrderFor = (place: { website?: string | null; phone?: string | null } | undefined, site?: string) => {
+    const online = site ?? (place?.website && isOwnSite(place.website) ? place.website : undefined);
+    const call = place?.phone ?? undefined;
+    return online || call ? { how_to_order: { ...(online && hostOf(online) ? { online: hostOf(online) } : {}), ...(call ? { call } : {}) } } : {};
+  };
+
   /** Runs one read_menu call: a kept chain menu, or the restaurant's own site, found by name among the places on cards, or looked up by name. */
   const readMenu = async (input: unknown): Promise<{ content: string; is_error?: boolean }> => {
     const args = (input ?? {}) as { restaurant?: unknown; looking_for?: unknown; website?: unknown; where?: unknown };
@@ -967,12 +975,14 @@ export async function reply(thread: ChatMessage[], guest: Guest, channel: Channe
     // Named a site no listing has: the menu is read from that site, and Claude is told the listings are other places.
     const unmatched = given && !fromListing && !card && listed.length ? { site_named_not_matched: true, site_note: `No listing by this name has the site ${hostOf(given)}. What follows is about that site only; the places in other_locations are different addresses and may be different restaurants. Say so, and never call one of them "the one".` } : {};
     const rest = describeOthers(fromListing ? others : listed);
-    const about = { restaurant: known, ...(where ? { where } : {}), ...unmatched, ...rest };
+    // Whether Wally can build an order isn't read_menu's to say: the nearby store list it could check holds only the couple of dozen stores around the person, and a place in another town is never in it. So it only ever says yes; anything else is find_menu's call. The site and phone ride along either way.
+    const orders = canOrder && (await orderableStores().catch(() => [] as Venue[])).some((v) => storeMatches(known, v));
+    const ordering = orders ? { orders_through_wally: true } : { ordering: "Not decided by this. Only find_menu can tell whether Wally can build an order here: call it before saying anything about ordering." };
+    const about = { restaurant: known, ...(where ? { where } : {}), ...unmatched, ...rest, ...ordering, ...howToOrderFor(fromListing, given ?? card?.website) };
     if (!website) return { content: JSON.stringify({ ...about, readable: false, note: fromListing || card ? "This place lists no website, so its menu can't be read. Point to the delivery app chips on its card, or offer to find it with find_places." : "No listing was found for that name. Ask the person, in one short line, where it is or for its website." }) };
     if (!readableSite(website)) return { content: JSON.stringify({ ...about, readable: false, website, note: "Its listed site is an ordering platform or marketplace page, which Wally doesn't read. Point the person to the Website link on its card for the menu." }) };
     const menu = await readSiteMenu(website);
     if (!menu) return { content: JSON.stringify({ ...about, readable: false, website, note: given ? `Nothing menu-like could be read from ${hostOf(given)}. Say that plainly, by that site's name; don't swap in another restaurant's site.` : "Nothing menu-like could be read from the site. Point the person to the Website link on its card." }) };
-    const orders = canOrder && (await orderableStores().catch(() => [] as Venue[])).some((v) => storeMatches(known, v));
     const text = lookingFor ? pickLines(menu.text, lookingFor) : menu.text;
     return {
       content: JSON.stringify({
@@ -983,7 +993,6 @@ export async function reply(thread: ChatMessage[], guest: Guest, channel: Channe
         ...(menu.items.length ? { items: menu.items.slice(0, 120) } : {}),
         ...(text ? { menu_text: text } : {}),
         ...(menu.pdfs.length ? { menu_pdfs: menu.pdfs } : {}),
-        orders_through_wally: orders,
         note: "Read from the restaurant's own site just now; prices there may be out of date. Say only what is here.",
       }),
     };
@@ -1044,10 +1053,7 @@ export async function reply(thread: ChatMessage[], guest: Guest, channel: Channe
         if (hit) ({ venue: store, entries } = hit);
         // What was asked and what the directory said, so a "not set up" answer can be traced: restaurant names and street addresses only, nothing about the person.
         console.log(`[order] find_menu "${restaurant}"${spot ? ` at "${spot}"` : ""}: ${place ? `${place.name} @ ${streetOf(place.address) ?? "no street address"}` : "no listing found"} → ${hit ? `orders at ${at?.name} @ ${streetOf(at?.address)}` : `not in the directory (also tried ${others.slice(0, 3).length} other location(s))`}`);
-        if (place && !hit) {
-          const site = place.website && isOwnSite(place.website) ? hostOf(place.website) : undefined;
-          howToOrder = { how_to_order: { ...(site ? { online: site } : {}), ...(place.phone ? { call: place.phone } : {}), ...(!site && !place.phone ? { neither: "No site or phone on its listing: point to the delivery apps on its card." } : {}) } };
-        }
+        if (place && !hit) howToOrder = howToOrderFor(place, namedSite(args.website));
         if (at) {
           about = {
             restaurant: at.name,
