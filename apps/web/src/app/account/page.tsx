@@ -17,6 +17,7 @@ import { delivery, reservations, type FoodService } from "@/lib/connectors";
 import { loadAccount } from "@/lib/server/accounts";
 import { SESSION_COOKIE, sessionSecret } from "@/lib/server/session";
 import { connectCode } from "@/lib/server/texting";
+import { verifyConfigured } from "@/lib/server/verify";
 import { firstTextLink, formatUsPhone } from "@/lib/signup";
 
 export const metadata: Metadata = { title: "Your account" };
@@ -67,6 +68,8 @@ async function Account({ searchParams }: { searchParams: Query }) {
   const linkElsewhere = problem === "link_elsewhere";
 
   const wallyNumber = process.env.NEXT_PUBLIC_WALLY_NUMBER ?? null;
+  // Whether a number can be added by a texted code. Without it, "Connect by text" is the only way.
+  const byText = verifyConfigured();
   // A ready-written text that proves this phone belongs to this account (see connectCode).
   const secret = sessionSecret();
   const connectLink = wallyNumber && inDatabase && session.id && secret ? firstTextLink(wallyNumber, `Hi Wally, connect my phone. Code: ${connectCode(session.id, secret)}`) : null;
@@ -139,7 +142,7 @@ async function Account({ searchParams }: { searchParams: Query }) {
                       Connect by text
                     </a>
                   ) : (
-                    <Action href="/join?link=1">Add your number</Action>
+                    byText && <Action href="/join?link=1">Add your number</Action>
                   )}
                 </div>
               </>
@@ -161,7 +164,8 @@ async function Account({ searchParams }: { searchParams: Query }) {
             icon={<Glyph>📱</Glyph>}
             title="Phone"
             detail={session.phone ? `+1 ${formatUsPhone(session.phone)}${wallyNumber ? " · connected to Wally by text" : ""}` : "Not linked"}
-            action={connectLink && !session.phone ? <Action href={connectLink}>Connect by text</Action> : <Action href="/join?link=1" quiet>{session.phone ? "Change" : "Add"}</Action>}
+            // Connecting again moves this number's texts back to this account, when another account has connected it since.
+            action={connectLink ? <Action href={connectLink} quiet={Boolean(session.phone)}>{session.phone ? "Reconnect" : "Connect by text"}</Action> : byText ? <Action href="/join?link=1" quiet>{session.phone ? "Change" : "Add"}</Action> : <Soon>Not open yet</Soon>}
           />
           <Row
             icon={<Glyph>@</Glyph>}

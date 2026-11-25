@@ -31,6 +31,11 @@ function devCode(): string | null {
   return code && /^\d{6}$/.test(code) ? code : null;
 }
 
+/**
+ * Whether people can sign up or add a number by a texted code. While this is
+ * off (no Twilio Verify), no page offers it: accounts are made by email or
+ * Google, and a phone is connected from the account page by texting Wally.
+ */
 export function verifyConfigured(): boolean {
   return config() !== null || devCode() !== null;
 }
