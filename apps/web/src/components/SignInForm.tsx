@@ -18,7 +18,8 @@ const problems: Record<string, string> = {
   network: "Couldn’t reach Wally. Check your connection and try again.",
 };
 
-export function SignInForm() {
+/** `byText` is whether sign-up by a texted code is on. When it isn't, this form is also how an account is made. */
+export function SignInForm({ byText }: { byText: boolean }) {
   const params = useSearchParams();
   // From the account page: add the email or Google to the account already signed in.
   const link = params.get("link") === "1";
@@ -102,7 +103,7 @@ export function SignInForm() {
           Email
         </label>
         <p id="email-hint" className="text-[0.95rem] text-ink-soft">
-          Wally emails you a link. No password to remember.
+          Wally emails you a link. No password to remember.{!byText && !link ? " New here? The link sets up your account." : ""}
         </p>
         <input
           id="email"
@@ -129,12 +130,14 @@ export function SignInForm() {
         </p>
       )}
 
-      <p className="mt-5 text-center text-[0.95rem] text-ink-soft">
-        Rather use your phone?{" "}
-        <Link href="/join" className="font-semibold text-green underline-offset-4 hover:underline">
-          Sign up by text
-        </Link>
-      </p>
+      {byText && (
+        <p className="mt-5 text-center text-[0.95rem] text-ink-soft">
+          Rather use your phone?{" "}
+          <Link href="/join" className="font-semibold text-green underline-offset-4 hover:underline">
+            Sign up by text
+          </Link>
+        </p>
+      )}
     </div>
   );
 }

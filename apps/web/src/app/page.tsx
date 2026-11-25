@@ -1,6 +1,7 @@
 import Link from "next/link";
 import type { CSSProperties } from "react";
 import { Wally } from "@/components/Wally";
+import { verifyConfigured } from "@/lib/server/verify";
 
 const asks = [
   "who has the best pad thai near me?",
@@ -15,6 +16,8 @@ const promises = [
 ];
 
 export default function Home() {
+  // Without texted codes, an account starts with an email or Google, on the sign-in page.
+  const byText = verifyConfigured();
   return (
     <main className="mx-auto flex w-full max-w-[1080px] flex-1 flex-col px-5 py-8 sm:px-8 min-[900px]:flex-row min-[900px]:items-center min-[900px]:gap-10 min-[900px]:py-12">
       <div className="order-2 min-[900px]:order-1 min-[900px]:flex-1">
@@ -36,14 +39,16 @@ export default function Home() {
 
         <div style={{ "--d": "2100ms" } as CSSProperties} className="arrive mt-9 flex flex-wrap items-center gap-x-6 gap-y-3">
           <Link
-            href="/join"
+            href={byText ? "/join" : "/signin"}
             className="press inline-flex h-14 items-center rounded-full bg-green px-8 font-display text-[1.125rem] font-semibold text-white hover:bg-green-deep"
           >
             Meet Wally
           </Link>
-          <Link href="/signin" className="font-semibold text-green underline-offset-4 hover:underline">
-            Sign in
-          </Link>
+          {byText && (
+            <Link href="/signin" className="font-semibold text-green underline-offset-4 hover:underline">
+              Sign in
+            </Link>
+          )}
           <p className="basis-full text-[0.95rem] text-ink-soft">Takes about a minute. Wally is an AI.</p>
         </div>
 

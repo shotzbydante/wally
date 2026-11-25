@@ -99,13 +99,26 @@ describe("wally_sign_in", () => {
     expect((await signIn({ phone: "3105550142" })).id).toBe(a.id);
   });
 
-  it("folds an account that already owns the phone into the linked one", async () => {
+  it("lets two accounts hold the same phone: connecting it merges nothing", async () => {
+    const one = await signIn({ email: "a@example.com", name: "Ana" });
+    const two = await signIn({ email: "b@example.com", name: "Bea" });
+    await signIn({ link: one.id, phone: "3105550142" });
+    const linked = await signIn({ link: two.id, phone: "3105550142" });
+    expect(linked).toMatchObject({ id: two.id, name: "Bea", email: "b@example.com", phone: "3105550142" });
+    expect(await get(one.id)).toMatchObject({ name: "Ana", email: "a@example.com", phone: "3105550142" });
+    expect(await count()).toBe(2);
+    // A plain sign-in by phone finds whoever connected it last.
+    expect((await signIn({ phone: "3105550142" })).id).toBe(two.id);
+  });
+
+  it("still keeps an email to one account, folding the other in", async () => {
     const byPhone = await signIn({ phone: "3105550142", name: "Ana", zip: "90026", typed: true });
     const byEmail = await signIn({ email: "a@example.com", google: true });
-    const linked = await signIn({ link: byEmail.id, phone: "3105550142" });
-    expect(linked).toMatchObject({ id: byEmail.id, name: "Ana", email: "a@example.com", google: true, phone: "3105550142", zip: "90026" });
-    expect(await get(byPhone.id)).toBeUndefined();
+    const linked = await signIn({ link: byPhone.id, email: "a@example.com", google: true });
+    expect(linked).toMatchObject({ id: byPhone.id, name: "Ana", email: "a@example.com", google: true, phone: "3105550142", zip: "90026" });
+    expect(await get(byEmail.id)).toBeUndefined();
     expect(await count()).toBe(1);
+    await expect(db.query("insert into public.accounts (email) values ('a@example.com')")).rejects.toThrow();
   });
 
   it("drops the Google mark when the email is changed by link", async () => {
@@ -213,6 +226,26 @@ describe("conversation", () => {
     expect(await thread(a.id)).toHaveLength(4);
   });
 
+  it("sends a shared phone's texts to the account that connected it last, and back again", async () => {
+    const textBegin = (content: string, external: string) =>
+      one<{ status: string; first?: boolean; account?: { id: string } }>("select public.wally_text_begin($1, $2, $3, 100, 40) as v", ["3105550142", content, external]);
+    const a = await signIn({ email: "a@example.com" });
+    const b = await signIn({ email: "b@example.com" });
+    await signIn({ link: a.id, phone: "3105550142" });
+    expect(await textBegin("to a", "s1")).toMatchObject({ status: "ok", first: true, account: { id: a.id } });
+    await signIn({ link: b.id, phone: "3105550142" });
+    expect(await textBegin("to b", "s2")).toMatchObject({ status: "ok", first: true, account: { id: b.id } });
+    // Connecting again from the first account moves the number's texts back.
+    await signIn({ link: a.id, phone: "3105550142" });
+    expect(await textBegin("to a again", "s3")).toMatchObject({ status: "ok", first: false, account: { id: a.id } });
+    expect((await thread(a.id)).map((m) => m.content)).toEqual(["to a", "to a again"]);
+    expect((await thread(b.id)).map((m) => m.content)).toEqual(["to b"]);
+    // STOP reaches every account with the number.
+    expect(await one<boolean>("select public.wally_text_stop($1, true) as v", ["3105550142"])).toBe(true);
+    await signIn({ link: b.id, phone: "3105550142" });
+    expect(await textBegin("hello?", "s4")).toEqual({ status: "stopped" });
+  });
+
   it("hands Wally only the most recent messages", async () => {
     const a = await signIn({ email: "a@example.com" });
     for (const text of ["one", "two", "three"]) await begin(a.id, text);
@@ -268,8 +301,8 @@ describe("conversation", () => {
     const byEmail = await signIn({ email: "a@example.com" });
     await begin(byPhone.id, "by text", "text");
     await begin(byEmail.id, "on the web");
-    await signIn({ link: byEmail.id, phone: "3105550142" });
-    expect((await thread(byEmail.id)).map((m) => m.content)).toEqual(["by text", "on the web"]);
+    await signIn({ link: byPhone.id, email: "a@example.com" });
+    expect((await thread(byPhone.id)).map((m) => m.content)).toEqual(["by text", "on the web"]);
   });
 });
 

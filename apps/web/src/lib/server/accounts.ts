@@ -156,7 +156,8 @@ export async function upgradeSession(res: NextResponse, session: Session, secret
 
 /**
  * Puts a phone number on an account, once a text from that number has proved
- * it is theirs. If another account already had the number, it is folded in.
+ * it is theirs. Other accounts with the same number keep it; this one becomes
+ * the account the number's texts go to (see 20261124000000_shared_phone.sql).
  * False if the account is gone. Throws DbError if the database can't be reached.
  */
 export async function linkPhone(accountId: string, phone: string): Promise<boolean> {
