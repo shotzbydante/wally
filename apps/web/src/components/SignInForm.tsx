@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useState, type FormEvent } from "react";
+import { capture } from "@/lib/analytics";
 
 const problems: Record<string, string> = {
   google_not_configured: "Google sign-in isn’t switched on yet.",
@@ -38,8 +39,11 @@ export function SignInForm() {
         body: JSON.stringify({ email, link }),
       });
       const data = (await res.json().catch(() => ({}))) as { error?: string; devLink?: string };
-      if (!res.ok) setError(problems[data.error ?? ""] ?? problems.provider_error!);
-      else {
+      if (!res.ok) {
+        capture("sign_in_link_failed", { error: data.error ?? "provider_error", linking: link });
+        setError(problems[data.error ?? ""] ?? problems.provider_error!);
+      } else {
+        capture("sign_in_link_requested", { linking: link });
         setSentTo(email.trim());
         setDevLink(data.devLink ?? null);
       }
@@ -80,6 +84,7 @@ export function SignInForm() {
     <div>
       <a
         href={link ? "/api/auth/google/start?link=1" : "/api/auth/google/start"}
+        onClick={() => capture("google_sign_in_started", { linking: link })}
         className="press flex h-14 w-full items-center justify-center gap-3 rounded-full border-2 border-line bg-pad text-[1.125rem] font-semibold hover:border-ink"
       >
         <GoogleMark />

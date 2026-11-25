@@ -2,6 +2,7 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import { asTexts, tidyLink, visibleChoices, webNudgeDue } from "@/lib/chat";
 import { linkPhone } from "./accounts";
 import { AgentError, reply } from "./agent";
+import { answerShape, flushAnalytics, queryText, track } from "./analytics";
 import { beginTextTurn, saveReply, setTextStopped, undoTurn } from "./conversation";
 import { DbError } from "./db";
 import { sessionSecret } from "./session";
@@ -213,6 +214,8 @@ export async function handleInbound(inbound: Inbound, origin: string): Promise<v
     const keyword = keywordOf(text);
     if (keyword === "stop" || keyword === "start") {
       const known = await setTextStopped(from, keyword === "stop");
+      // No account id comes back from the switch, so these are counted without one.
+      if (known) track(null, keyword === "stop" ? "texts_stopped" : "texts_restarted", { provider });
       // Twilio answers STOP and START itself, at the carrier's insistence. iMessage has no such layer.
       if (known && provider !== "twilio") await sendText(provider, from, keyword === "stop" ? NOTICE.stopped : NOTICE.started);
       return;
@@ -241,16 +244,30 @@ export async function handleInbound(inbound: Inbound, origin: string): Promise<v
     if (begun.status === "duplicate" || begun.status === "stopped") return;
     if (begun.status === "unknown") {
       // Someone who isn't a member wrote first. One plain answer, and nothing is kept.
+      track(null, "text_from_unknown_number", { provider });
       await sendText(provider, from, NOTICE.unknown(origin));
       return;
     }
     if (begun.status === "limited") {
+      track(null, "message_limited", { channel: "text", provider });
       await sendText(provider, from, NOTICE.limited);
       return;
     }
     if (begun.status !== "ok") return;
 
     const { account } = begun;
+    const asked = Date.now();
+    track(account.id, "message_sent", {
+      channel: "text",
+      provider,
+      via: "typed",
+      ...queryText(text),
+      first_text: begun.first,
+      thread_length: begun.messages.length,
+      has_address: Boolean(account.address),
+      $set: { uses_text: true, last_channel: "text", text_provider: provider, has_phone: true, has_address: Boolean(account.address) },
+      $set_once: { first_channel: "text" },
+    });
     if (begun.first) {
       // The first text: say who he is, that he's an AI, and hand over his contact card.
       await sendText(provider, from, NOTICE.hello);
@@ -260,6 +277,7 @@ export async function handleInbound(inbound: Inbound, origin: string): Promise<v
     try {
       const answer = await reply(begun.messages, { id: account.id, name: account.name, zip: account.zip, near: account.near, address: account.address }, "text", { onText: () => {} });
       const saved = await saveReply(account.id, "text", answer.content, answer.choices);
+      track(account.id, "wally_replied", { channel: "text", provider, seconds: Math.round((Date.now() - asked) / 100) / 10, ...answerShape(answer.choices) });
       if (saved) {
         // Options always end with a link to the website. That it is the same conversation is said
         // on his first answer and after a quiet week: under the options, or as a P.S. to plain words.
@@ -270,10 +288,19 @@ export async function handleInbound(inbound: Inbound, origin: string): Promise<v
     } catch (error) {
       // Take the unanswered text back out of the thread, as the website does.
       await undoTurn(account.id, begun.id).catch(() => {});
+      track(account.id, "wally_failed", {
+        channel: "text",
+        provider,
+        reason: error instanceof AgentError ? error.reason : error instanceof DbError ? "unavailable" : "failed",
+        seconds: Math.round((Date.now() - asked) / 100) / 10,
+      });
       if (!(error instanceof AgentError) && !(error instanceof DbError)) console.error("[text]", error instanceof Error ? error.name : "unknown error");
       await sendText(provider, from, NOTICE.failed);
     }
   } catch (error) {
     console.error("[text] not handled:", error instanceof DbError ? "database" : error instanceof Error ? error.name : "unknown error");
+  } finally {
+    // This runs after the provider has been answered, so the wait costs the person nothing.
+    await flushAnalytics();
   }
 }

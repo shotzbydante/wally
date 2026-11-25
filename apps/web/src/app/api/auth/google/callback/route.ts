@@ -1,7 +1,8 @@
 import { timingSafeEqual } from "node:crypto";
-import { NextResponse } from "next/server";
+import { NextResponse, after } from "next/server";
 import { cleanFirstName } from "@/lib/signup";
 import { signIn } from "@/lib/server/accounts";
+import { flushAnalytics } from "@/lib/server/analytics";
 import { appOrigin, sessionSecret } from "@/lib/server/session";
 
 const STATE_COOKIE = "wally_oauth_state";
@@ -62,6 +63,7 @@ export async function GET(request: Request) {
   const res = NextResponse.redirect(`${origin}/account`, 303);
   res.cookies.delete({ name: STATE_COOKIE, path: "/api/auth/google" });
   const identity = { email: claims.email.toLowerCase(), google: true, name: cleanFirstName(claims.given_name ?? claims.name ?? "") };
-  if (!(await signIn(res, request, identity, secret, { link: state.endsWith(".link") }))) return fail("unavailable");
+  if (!(await signIn(res, request, identity, secret, { link: state.endsWith(".link"), method: "google" }))) return fail("unavailable");
+  after(flushAnalytics);
   return res;
 }

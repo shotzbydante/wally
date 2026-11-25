@@ -4,9 +4,11 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { connection } from "next/server";
 import { Suspense, type ReactNode } from "react";
+import { AnalyticsUser } from "@/components/AnalyticsUser";
 import { EraseButton } from "@/components/EraseButton";
 import { NameForm } from "@/components/NameForm";
 import { Notice, noticeAction as primary } from "@/components/Notice";
+import { SignOutForm } from "@/components/SignOutForm";
 import { SignedInHeader } from "@/components/SignedInHeader";
 import { SiteIcon } from "@/components/SiteIcon";
 import { Wally } from "@/components/Wally";
@@ -71,6 +73,7 @@ async function Account({ searchParams }: { searchParams: Query }) {
 
   return (
     <>
+      {inDatabase && session.id && <AnalyticsUser id={session.id} email={Boolean(session.email)} google={Boolean(session.google)} phone={Boolean(session.phone)} address={Boolean(session.address)} />}
       <SignedInHeader active="/account" text={wallyNumber ? { href: session.phone ? firstTextLink(wallyNumber, "") : "#texting", connected: Boolean(session.phone) } : undefined} />
 
       <main className="mx-auto w-full max-w-[640px] flex-1 px-5 pt-6 pb-16 sm:px-8">
@@ -179,11 +182,11 @@ async function Account({ searchParams }: { searchParams: Query }) {
             title="Signed in"
             detail={session.email ?? (session.phone ? `+1 ${formatUsPhone(session.phone)}` : "This browser")}
             action={
-              <form action="/api/session/logout" method="post">
+              <SignOutForm>
                 <button type="submit" className="press h-11 rounded-xl bg-pad px-4 font-semibold ring-1 ring-line ring-inset hover:ring-ink">
                   Sign out
                 </button>
-              </form>
+              </SignOutForm>
             }
           />
         </Section>
@@ -229,14 +232,14 @@ async function Account({ searchParams }: { searchParams: Query }) {
               title="Your details"
               detail="For now, everything on this page is stored only in this browser. Signing out erases it."
               action={
-                <form action="/api/session/logout" method="post">
+                <SignOutForm>
                   <button
                     type="submit"
                     className="press h-11 rounded-xl border border-red/50 px-4 font-semibold text-red hover:bg-red/5"
                   >
                     Sign out and erase
                   </button>
-                </form>
+                </SignOutForm>
               }
             />
           )}
