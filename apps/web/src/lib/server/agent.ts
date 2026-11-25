@@ -92,7 +92,7 @@ const ORDERING = `# Ordering (restaurants that take orders through Square)
 - When someone wants to order something, call find_menu with the restaurant's name and the dish in their words. It tells you whether the place takes orders this way, and lists matching menu items with their prices and the choices each one needs (a base, a protein, a size).
 - Whether you can build an order is decided location by location, and only find_menu knows. When a name has several locations and the person says or picks one ("Shields is closest"), call find_menu again with that location in where before saying anything about ordering there. Never say you can't build an order at a location find_menu hasn't been asked about, and never carry a "not set up" answer from one location over to another.
 - If find_menu answers for a different location than the one asked (not_the_location_asked), say which location you can order from and ask whether that one works; don't build a ticket until they say yes.
-- If the place doesn't take orders this way, say in one line that it isn't set up for ordering through you yet, and point them to its own site or the delivery apps on its card. Never say it doesn't take orders at all (it may, on its own site), and never pretend to order anywhere else.
+- If the place isn't set up for ordering through you, don't stop at "I can't". Say so in a few words, then give the two ways they can order right now, from how_to_order in the result: online on the restaurant's own site, written as its bare address (diciccos.com), and by phone, with the number exactly as given. Write both into your sentence so they can be tapped; this is the one place a site address and a phone number belong in your words. If you already listed what they want, name the dishes so they can read the order out. If the result has no site or no number, give the one it has, or the delivery apps on its card when it has neither. Never invent a site or a number, never say the place doesn't take orders at all (it may, on its own site or by phone), and never pretend to order anywhere else.
 - Before building the order, you must know every required choice. Ask for the ones the person hasn't given, in one message, offering the options by name. Don't guess a protein or a base.
 - A menu you read in one of your last few answers stays ready: it appears in your own earlier turn as a "Menu at …" line with its item and option ids. When the person answers your question, call order_ticket with those ids straight away; don't call find_menu again for the same place and dish (each read costs money) unless order_ticket says the menu is gone.
 - Only pickup items are listed. If find_menu says the dish is for dining in only, say so and offer another.
@@ -119,7 +119,7 @@ This matters as much as what you say. A good waiter is brief.
 - At most one flourish per message, and none when plain is clearer. No emoji in your sentences.
 - Use the person's name rarely: a greeting, or a moment that earns it. Never in back-to-back messages.
 - Say a caveat once. If you've already said in this conversation that you can't confirm hours or can't book, don't repeat it unless it matters again.
-- American English. Plain text only: no markdown, asterisks, headings or links typed into your sentences, and no bullets except the "• " lines of a menu answer. The same words must read well in a text message.
+- American English. Plain text only: no markdown, asterisks, headings or links typed into your sentences (except a restaurant's site and phone number when you can't build its order, see "Ordering"), and no bullets except the "• " lines of a menu answer. The same words must read well in a text message.
 - When something has gone wrong, or money, allergies or safety come up, drop the theatre and be neutral and exact.
 
 # What you can do today
@@ -827,6 +827,7 @@ export async function reply(thread: ChatMessage[], guest: Guest, channel: Channe
         ratings: null,
         price: null,
         website: null,
+        phone: null,
         maps: `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${store.name} ${store.address ?? ""}`.trim())}`,
         takeout: true,
         delivery: null,
@@ -1013,6 +1014,8 @@ export async function reply(thread: ChatMessage[], guest: Guest, channel: Channe
       let entries: MenuEntry[] | undefined;
       // Which place was looked at, and the others by the same name, so Claude never answers for "DiCicco's" as if there were one.
       let about: Record<string, unknown> = {};
+      // How the person can order on their own when Wally can't build it: the restaurant's site and its phone, from its listing.
+      let howToOrder: Record<string, unknown> = {};
       if (!store && ordering.lookup) {
         // By name and street address, with the dish as the query, so the menu search rides on the same call.
         const { place, others, matched } = pickNamed(await placesNamed(restaurant, spot), { site: namedSite(args.website), where: spot });
@@ -1039,6 +1042,12 @@ export async function reply(thread: ChatMessage[], guest: Guest, channel: Channe
           }
         }
         if (hit) ({ venue: store, entries } = hit);
+        // What was asked and what the directory said, so a "not set up" answer can be traced: restaurant names and street addresses only, nothing about the person.
+        console.log(`[order] find_menu "${restaurant}"${spot ? ` at "${spot}"` : ""}: ${place ? `${place.name} @ ${streetOf(place.address) ?? "no street address"}` : "no listing found"} → ${hit ? `orders at ${at?.name} @ ${streetOf(at?.address)}` : `not in the directory (also tried ${others.slice(0, 3).length} other location(s))`}`);
+        if (place && !hit) {
+          const site = place.website && isOwnSite(place.website) ? hostOf(place.website) : undefined;
+          howToOrder = { how_to_order: { ...(site ? { online: site } : {}), ...(place.phone ? { call: place.phone } : {}), ...(!site && !place.phone ? { neither: "No site or phone on its listing: point to the delivery apps on its card." } : {}) } };
+        }
         if (at) {
           about = {
             restaurant: at.name,
@@ -1052,7 +1061,7 @@ export async function reply(thread: ChatMessage[], guest: Guest, channel: Channe
       }
       if (!store) {
         const names = stores.slice(0, 6).map((s) => s.name);
-        return { content: JSON.stringify({ ...about, takes_orders: false, note: "This restaurant isn't set up for ordering through Wally (it isn't in the ordering directory Wally can build carts from). Say so in one line and point the person to its own site or the delivery apps on its card; never say it doesn't take orders at all.", nearby_that_do: names }) };
+        return { content: JSON.stringify({ ...about, takes_orders: false, ...howToOrder, note: "This restaurant isn't set up for ordering through Wally (it isn't in the ordering directory Wally can build carts from). Say so in a few words, then give the ways in how_to_order: its own site as a bare address, and its phone number as written. Never say it doesn't take orders at all.", nearby_that_do: names }) };
       }
       entries ??= await ordering.menu(store.id, dish);
       menu = menuFound(store, entries);

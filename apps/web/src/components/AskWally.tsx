@@ -4,7 +4,7 @@ import { memo, useCallback, useEffect, useRef, useState, useSyncExternalStore, t
 import { LocationBar } from "@/components/LocationBar";
 import { Wally } from "@/components/Wally";
 import { WallyFace, type WallyLook } from "@/components/WallyFace";
-import { CLOSED_ASK, MAX_MESSAGE_CHARS, OPEN_BADGE_MINUTES, asideOf, deliveryLinks, dollars, fastFoodAsk, hostOf, howFarParts, isOwnSite, offersClosed, offersFastFood, splitSources, visibleChoices, type ChatEvent, type ChatMessage, type Choice, type TicketInfo } from "@/lib/chat";
+import { CLOSED_ASK, MAX_MESSAGE_CHARS, OPEN_BADGE_MINUTES, asideOf, deliveryLinks, dollars, fastFoodAsk, hostOf, howFarParts, isOwnSite, linkParts, offersClosed, offersFastFood, splitSources, visibleChoices, type ChatEvent, type ChatMessage, type Choice, type TicketInfo } from "@/lib/chat";
 import { SiteIcon } from "@/components/SiteIcon";
 import { capture, type Via } from "@/lib/analytics";
 
@@ -653,6 +653,23 @@ function ByText() {
   return <span className="mt-1 block text-[0.8rem] opacity-70">sent by text</span>;
 }
 
+/** Wally's words, with any phone number or site address in them made tappable (see linkParts). */
+function Said({ text }: { text: string }) {
+  return (
+    <>
+      {linkParts(text).map((part, i) =>
+        part.href ? (
+          <a key={i} href={part.href} {...(part.href.startsWith("tel:") ? {} : { target: "_blank", rel: "noopener noreferrer" })} className="font-semibold text-green underline underline-offset-4">
+            {part.text}
+          </a>
+        ) : (
+          part.text
+        ),
+      )}
+    </>
+  );
+}
+
 function UserBubble({ text, byText = false, fresh = false }: { text: string; byText?: boolean; fresh?: boolean }) {
   return (
     <p className={`ml-auto max-w-[85%] rounded-[1.35rem] rounded-br-md fill-green bg-green px-4 py-2 break-words whitespace-pre-wrap text-white ${fresh ? "sent-mine" : ""}`}>
@@ -717,7 +734,7 @@ function WallyTurn({
       {said && (
         <p className="card w-fit max-w-[92%] rounded-[1.35rem] rounded-bl-md bg-pad px-4 py-2.5 break-words whitespace-pre-wrap ring-1 ring-line ring-inset">
           <span className="sr-only">Wally: </span>
-          {said}
+          <Said text={said} />
           {writing && <span className="caret" aria-hidden="true" />}
           {byText && <ByText />}
         </p>
