@@ -31,11 +31,29 @@ export const mayHandOff = (quote: Quote, now = new Date()): Decision => canHandO
 const FILLER = new Set(["the", "and", "los", "angeles", "restaurant", "cafe", "kitchen", "bar", "grill", "inc", "llc"]);
 const words = (s: string) => s.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9 ]/g, " ").split(/\s+/).filter((w) => w.length > 2 && !FILLER.has(w));
 
-/** Loose match between a name a person used and a venue's listed name. */
+/** A name with its filler words, spaces and punctuation gone: "Di Cicco's Restaurant" and "DiCicco's" both become "diciccos". */
+const squashed = (s: string) =>
+  s
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .replace(/[^a-z0-9 ]/g, " ")
+    .split(/\s+/)
+    .filter((w) => w && !FILLER.has(w))
+    .join("");
+
+/**
+ * Loose match between a name a person used and a venue's listed name. Word by
+ * word first; then with spacing and punctuation ignored, since people and
+ * listings split names differently ("Di Cicco's" for "DiCicco's Italian
+ * Restaurant - Shields", which word by word never matched: 2026-11-24).
+ */
 export function nameMatches(wanted: string, listed: string): boolean {
   const a = words(wanted);
   const b = words(listed);
-  return a.length > 0 && a.every((w) => b.some((x) => x.startsWith(w) || w.startsWith(x)));
+  if (a.length > 0 && a.every((w) => b.some((x) => x.startsWith(w) || w.startsWith(x)))) return true;
+  const w = squashed(wanted);
+  return w.length >= 5 && squashed(listed).includes(w);
 }
 
 /**
