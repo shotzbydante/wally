@@ -5,7 +5,7 @@ import { memo, useCallback, useEffect, useRef, useState, useSyncExternalStore, t
 import { LocationBar } from "@/components/LocationBar";
 import { Wally } from "@/components/Wally";
 import { WallyFace, type WallyLook } from "@/components/WallyFace";
-import { CLOSED_ASK, MAX_MESSAGE_CHARS, OPEN_BADGE_MINUTES, asideOf, deliveryLinks, dollars, fastFoodAsk, hostOf, howFarParts, isOwnSite, linkParts, offersClosed, offersFastFood, splitSources, visibleChoices, type ChatEvent, type ChatMessage, type Choice, type TicketInfo } from "@/lib/chat";
+import { CLOSED_ASK, MAX_MESSAGE_CHARS, OPEN_BADGE_MINUTES, asideOf, deliveryLinks, dollars, fastFoodAsk, hostOf, howFarParts, isOwnSite, linkParts, menuShown, orderAsk, withoutMenuNote, offersClosed, offersFastFood, splitSources, visibleChoices, type ChatEvent, type ChatMessage, type Choice, type MenuSnapshot, type TicketInfo } from "@/lib/chat";
 import { SiteIcon } from "@/components/SiteIcon";
 import { capture, type Via } from "@/lib/analytics";
 import { ideaFor } from "@/lib/discover";
@@ -543,6 +543,68 @@ export function AskWally({
  * An order ready to pay, laid out like a restaurant check. Every figure is the
  * restaurant's own; the person pays on its checkout page, never here.
  */
+/** How many menu items show before "Show all". */
+const MENU_ROWS = 5;
+
+/**
+ * What find_menu found at a place Wally can order from, drawn as a menu: the
+ * restaurant, then one row per item with its price, tapped to order it. Only
+ * the latest answer's menu can be tapped. Items needing a choice say so;
+ * Wally asks for it when the row is tapped.
+ */
+function MenuCard({ menu, live, onOrder }: { menu: MenuSnapshot; live: boolean; onOrder: (item: string) => void }) {
+  const items = Object.values(menu.items);
+  const [all, setAll] = useState(false);
+  const rows = all ? items : items.slice(0, MENU_ROWS);
+  return (
+    <div className={`card mt-2 max-w-[26rem] overflow-hidden rounded-2xl bg-pad ring-1 ring-line ring-inset ${live ? "arrive" : "opacity-70"}`}>
+      <div className="flex items-end justify-between gap-3 px-4 pt-3.5 pb-2.5">
+        <div className="min-w-0">
+          <p className="text-[0.72rem] font-semibold tracking-[0.12em] text-ink-soft uppercase">Order with Wally</p>
+          <p className="mt-0.5 truncate font-display text-[1.1rem] leading-tight font-bold">
+            {menu.venue.name}
+            <OrderCheck />
+          </p>
+        </div>
+        <span className="shrink-0 rounded-full bg-mint-wash px-2.5 py-0.5 text-[0.75rem] font-semibold text-green">Pickup</span>
+      </div>
+      <ul className="border-t border-line">
+        {rows.map((item, i) => (
+          <li key={item.itemId} className={`${i ? "border-t border-line/70" : ""} ${live ? "arrive" : ""}`} style={{ "--d": `${80 + i * 45}ms` } as CSSProperties}>
+            <button
+              type="button"
+              disabled={!live}
+              onClick={() => onOrder(item.name)}
+              aria-label={`Order ${item.name}, ${dollars(item.unitPrice)}`}
+              className="press group flex w-full items-center gap-3 px-4 py-2.5 text-left transition-colors enabled:hover:bg-mint-wash/50 enabled:focus-visible:bg-mint-wash/50"
+            >
+              <span className="min-w-0 flex-1">
+                <span className="block truncate font-semibold">{item.name}</span>
+                {(item.description || item.choices.length > 0) && (
+                  <span className="block truncate text-[0.85rem] text-ink-soft">{[item.choices.length ? "Choices to pick" : "", item.description].filter(Boolean).join(" · ")}</span>
+                )}
+              </span>
+              <span className="shrink-0 font-semibold tabular-nums">{dollars(item.unitPrice)}</span>
+              {live && (
+                <span className="fill-green flex size-7 shrink-0 items-center justify-center rounded-full bg-green text-white transition-transform group-enabled:group-hover:scale-110" aria-hidden="true">
+                  <svg viewBox="0 0 16 16" className="size-3.5" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round">
+                    <path d="M8 3v10M3 8h10" />
+                  </svg>
+                </span>
+              )}
+            </button>
+          </li>
+        ))}
+      </ul>
+      {items.length > MENU_ROWS && !all && (
+        <button type="button" onClick={() => setAll(true)} className="press w-full border-t border-line px-4 py-2.5 text-[0.9rem] font-semibold text-green hover:bg-mint-wash/40">
+          Show all {items.length}
+        </button>
+      )}
+    </div>
+  );
+}
+
 function Ticket({ ticket: t, live }: { ticket: TicketInfo; live: boolean }) {
   const row = (label: string, value: string, strong = false) => (
     <div className={`flex justify-between gap-3 ${strong ? "font-bold" : "text-ink-soft"}`}>
@@ -720,7 +782,7 @@ const StoredMessage = memo(function StoredMessage({ message: m, live, say }: { m
   return m.role === "user" ? (
     <UserBubble text={m.content} byText={m.channel === "text"} />
   ) : (
-    <WallyTurn text={m.content} at={m.created_at} byText={m.channel === "text"} choices={m.choices} live={live} onPick={(c, via = "card") => say(c.reply, via)} onMore={() => say("Show me 4 more", "more")} onFastFood={() => say(fastFoodAsk(m.choices), "fast_food")} onClosed={() => say(CLOSED_ASK, "closed")} />
+    <WallyTurn text={m.content} at={m.created_at} byText={m.channel === "text"} choices={m.choices} live={live} onPick={(c, via = "card") => say(c.reply, via)} onOrder={(venue, item) => say(orderAsk(venue, item), "order")} onMore={() => say("Show me 4 more", "more")} onFastFood={() => say(fastFoodAsk(m.choices), "fast_food")} onClosed={() => say(CLOSED_ASK, "closed")} />
   );
 });
 
@@ -732,6 +794,7 @@ function WallyTurn({
   writing = false,
   live = false,
   onPick,
+  onOrder,
   onMore,
   onFastFood,
   onClosed,
@@ -745,6 +808,8 @@ function WallyTurn({
   /** Only the latest answer's options can still be picked. */
   live?: boolean;
   onPick?: (choice: Choice, via?: Via) => void;
+  /** Orders one item from the menu shown under this answer. */
+  onOrder?: (venue: string, item: string) => void;
   /** Asks Wally for the next four places. */
   onMore?: () => void;
   /** Asks for the fast-food and drive-thru kind of answer, around the same spot. */
@@ -753,7 +818,10 @@ function WallyTurn({
   onClosed?: () => void;
 }) {
   // Sources ride along in the text (see splitSources); here they become links.
-  const { text: said, sources } = splitSources(text);
+  const { text: spoken, sources } = splitSources(text);
+  // A menu note he copied into his words is his, not the person's (see withoutMenuNote).
+  const said = withoutMenuNote(spoken);
+  const menu = menuShown(choices);
   // "Open" was true when he answered; it isn't worth showing on an old message.
   // It depends on the visitor's clock, so the server renders without it.
   const fresh = useSyncExternalStore(
@@ -774,6 +842,7 @@ function WallyTurn({
           {byText && <ByText />}
         </p>
       )}
+      {menu && <MenuCard menu={menu} live={live} onOrder={(item) => onOrder?.(menu.venue.name, item)} />}
       {shown?.some((c) => c.ticket) && shown.map((c, i) => c.ticket && <Ticket key={i} ticket={c.ticket} live={live} />)}
       {shown && shown.length > 0 && !shown.some((c) => c.ticket) && (
         <ul className={`mt-2 grid gap-1.5 ${places ? "" : "sm:grid-cols-2"}`}>

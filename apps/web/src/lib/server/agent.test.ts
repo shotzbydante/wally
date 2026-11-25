@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { asPlainText, asTexts, linkParts, decodeCid, encodeCid, mapLinkFor, shortMapLink, textDeliveryLinks, isOwnSite, tidyLink, webNudgeDue, splitSources, withSources, type ChatMessage } from "@/lib/chat";
+import { asPlainText, asTexts, linkParts, menuShown, orderAsk, withoutMenuNote, type MenuSnapshot, decodeCid, encodeCid, mapLinkFor, shortMapLink, textDeliveryLinks, isOwnSite, tidyLink, webNudgeDue, splitSources, withSources, type ChatMessage } from "@/lib/chat";
 import { describePlaces, isAt, menuTerms, nameTerms, namedSite, pickNamed, storeNames, readChoices, sameSite, readWeb, timeNote, toClaudeMessages, withHistoryCache, withNote, type FoundPlace } from "./agent";
 
 const message = (id: number, role: ChatMessage["role"], content: string, choices: ChatMessage["choices"] = null): ChatMessage => ({
@@ -346,5 +346,38 @@ describe("the words a menu search tries", () => {
     expect(nameTerms("Stara Pierogi & Sausage", "stara")).toEqual(["stara", "pierogi", "sausage"]);
     expect(nameTerms("The Poke Bar Kitchen")).toEqual(["poke"]);
     expect(nameTerms("Café Dulcé Bakery")).toEqual(["dulce", "bakery"]);
+  });
+});
+
+describe("menu notes and the menu card", () => {
+  const menu: MenuSnapshot = {
+    venue: { id: "v1", name: "Rumi Coffee", address: "1 Main St" } as MenuSnapshot["venue"],
+    items: { m1: { itemId: "x1", name: "Latte", description: "Espresso and milk", unitPrice: 550, pickup: true, choices: [] } },
+    options: {},
+    age: 0,
+    fresh: true,
+  };
+  const carried = { emoji: "", title: "Menu at Rumi Coffee", detail: "", reply: "", menu };
+
+  it("takes a copied menu note out of Wally's words and keeps the rest", () => {
+    const said = "Rumi has a few drinks.\n\nMenu at Rumi Coffee (order_ticket takes these ids): m1 Latte $5.50 | m2 Mocha $6.00\n\nWhat would you like?";
+    expect(withoutMenuNote(said)).toBe("Rumi has a few drinks.\n\nWhat would you like?");
+    expect(withoutMenuNote("The menu at Rumi is short: lattes and mochas.")).toBe("The menu at Rumi is short: lattes and mochas.");
+  });
+
+  it("never shows the note to the person, but Claude still reads it back marked as his own", () => {
+    const message = { content: "Here's Rumi.\n\nMenu at Rumi Coffee (order_ticket takes these ids): m1 Latte $5.50", choices: [carried] };
+    expect(asTexts(message, "https://www.wallywaiter.com")[0]).toBe("Here's Rumi.");
+    const history = asPlainText(message);
+    expect(history.match(/order_ticket takes these ids/g)).toHaveLength(1);
+    expect(history).toContain("never shown to the person");
+  });
+
+  it("shows the menu only under the answer that read it, and never beside a ticket", () => {
+    expect(menuShown([carried])?.venue.name).toBe("Rumi Coffee");
+    expect(menuShown([{ ...carried, menu: { ...menu, fresh: undefined } }])).toBeUndefined();
+    const ticket = { emoji: "", title: "", detail: "", reply: "", ticket: {} as never };
+    expect(menuShown([carried, ticket])).toBeUndefined();
+    expect(orderAsk("Rumi Coffee", "Latte")).toBe("Order the Latte from Rumi Coffee");
   });
 });

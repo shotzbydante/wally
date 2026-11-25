@@ -1,5 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
-import { CURRENT_LOCATION, asPlainText, cityOf, hostOf, isOwnSite, withSources, type Aside, type ChatMessage, type Choice, type MenuSnapshot, type PlaceInfo, type Source, type TicketInfo } from "@/lib/chat";
+import { CURRENT_LOCATION, asPlainText, cityOf, hostOf, isOwnSite, withSources, type Aside, type ChatMessage, type Choice, type MenuSnapshot, type PlaceInfo, type Source, type TicketInfo, withoutMenuNote } from "@/lib/chat";
 import { chainOf } from "@/lib/chains";
 import { chainMenuFor, describeChainMenu } from "./chain-menus";
 import { readSiteMenu, readableSite } from "./menu-site";
@@ -88,6 +88,7 @@ const ORDERING = `# Ordering (restaurants that take orders through Square)
 - You can build a pickup order at some restaurants and hand the person a page to pay on. The person pays the restaurant directly; you never take payment.
 - find_orderable_places lists the nearest restaurants where you can build a pickup order, with no cuisine filter; show all of its ids with show_places. For a cuisine, use find_places instead and read can_order.
 - The location set on the page (their saved address, or the current location they are sharing) is where "near me" is, wherever they live or whatever ZIP their account holds: someone traveling is served where they are. Never ask for a ZIP when a location is set: ordering works from it on its own. Ask for one only if a tool result tells you to, and never answer a request with a question about ZIPs otherwise.
+- How to offer what find_menu found. On the website, every item it returned is shown right under your answer as a menu the person taps to order, so don't list items: one or two sentences, naming the one you'd pick and its price, then ask what they'd like. By text, list three or four as "• Item — $price" lines. Never write item or option ids (m1, o2) or a "Menu at" line in your words: those are your own notes.
 - When someone says "Order from <place>" without a dish, call find_menu with no dish: it returns some of what's on its menu. Offer three or four by name and price and ask what they'd like.
 - When someone wants to order something, call find_menu with the restaurant's name and the dish in their words. It tells you whether the place takes orders this way, and lists matching menu items with their prices and the choices each one needs (a base, a protein, a size).
 - When you call find_menu, always give also: two to four other names the menu might use for the dish. Never ask the person what to call a dish or to guess its name on the menu: if find_menu shows other items instead (matched_what_was_asked false), offer the closest by name and price; if it finds nothing, give how_to_order. Each dish in a multi-item order is its own find_menu call and its own ticket.
@@ -789,6 +790,8 @@ export async function reply(thread: ChatMessage[], guest: Guest, channel: Channe
   /** The menu being ordered from: read this turn, or carried over from the last few answers. */
   let menu: MenuFound | null = savedMenu(thread);
   let menuUsed = false;
+  // find_menu read a menu this turn: the page shows it under the answer.
+  let menuRead = false;
   let ticketed = false;
   /** The venues that take orders near the person, looked up once per turn and only when a search needs them. */
   let orderable: Promise<Venue[]> | null = null;
@@ -1137,6 +1140,7 @@ export async function reply(thread: ChatMessage[], guest: Guest, channel: Channe
       entries = [...found.values()].slice(0, 24);
       menu = menuFound(venue, entries);
       menuUsed = true;
+      menuRead = true;
       const dineInOnly = entries.length - Object.keys(menu.items).length;
       if (!Object.keys(menu.items).length) {
         // Nothing to order here by any name: say what was looked for, and how they can order it themselves by name.
@@ -1342,7 +1346,7 @@ export async function reply(thread: ChatMessage[], guest: Guest, channel: Channe
     const web = readWeb(blocks);
     const hosts = new Set(web.found.map((s) => hostOf(s.url)));
     choices ??= readChoices(choicesInput, hosts);
-    const said = text.trim();
+    const said = withoutMenuNote(text);
     if (!said && !choices) throw new AgentError("failed");
     // Places that fit but were closed are left off the cards; the page and a text offer them next.
     // Not under an answer that is itself the closed ones: there is nothing further to offer there.
@@ -1354,7 +1358,7 @@ export async function reply(thread: ChatMessage[], guest: Guest, channel: Channe
     }
     // An order still being decided keeps its menu with the answer, so the next turn can ticket it without reading the menu again.
     if (menu && !ticketed) {
-      const carried: MenuSnapshot = { ...menu, age: menuUsed ? 0 : menu.age + 1 };
+      const carried: MenuSnapshot = { venue: menu.venue, items: menu.items, options: menu.options, age: menuUsed ? 0 : menu.age + 1, ...(menuRead ? { fresh: true as const } : {}) };
       if (carried.age < MENU_TURNS) choices = [...(choices ?? []), { emoji: "", title: `Menu at ${menu.venue.name}`, detail: "", reply: "", menu: carried }];
     }
     // Show what he cited. If he searched but cited nothing, show where the cards' links came from.

@@ -50,6 +50,8 @@ export interface MenuSnapshot {
   options: Record<string, { itemId: string; groupId: string; optionId: string }>;
   /** How many answers ago it was last read or ordered from. */
   age: number;
+  /** Read in this answer, so the page shows it under it; a menu carried from an earlier answer isn't shown again. */
+  fresh?: true;
 }
 
 /** The options a person is shown; a carried menu is not one. */
@@ -69,8 +71,35 @@ export function menuLines(menu: MenuSnapshot): string {
     });
     return `${id} ${item.name} ${dollars(item.unitPrice)}${groups.length ? ` [${groups.join("; ")}]` : ""}`;
   });
-  return `Menu at ${menu.venue.name} (order_ticket takes these ids): ${items.join(" | ")}`;
+  return `${MENU_NOTE} Menu at ${menu.venue.name} (order_ticket takes these ids): ${items.join(" | ")}`;
 }
+
+/** Marks the carried menu in Claude's history as notes kept for him, so he doesn't take it for something he said and say it again. */
+const MENU_NOTE = "[Wally's own notes, never shown to the person; don't repeat them]";
+
+/**
+ * Wally's words without a menu note he copied into them. He reads his earlier
+ * turns with the carried menu written in ("Menu at Rumi Coffee (order_ticket
+ * takes these ids): m1 …") and has started writing that line himself, ids and
+ * all (2026-11-25). Any paragraph that names order_ticket or reads like that
+ * note is taken out, wherever his words are shown or read back.
+ */
+export function withoutMenuNote(text: string): string {
+  return text
+    .split(/\n\s*\n/)
+    .filter((part) => !/order_ticket|^\s*(\[[^\]]*\]\s*)?Menu at [^\n]*\bids?\b/i.test(part))
+    .join("\n\n")
+    .trim();
+}
+
+/** The menu found in this answer, to show as a menu the person can order from; one carried over from an earlier answer isn't shown again. */
+export const menuShown = (choices: Choice[] | null | undefined): MenuSnapshot | undefined => {
+  const menu = (choices ?? []).find((c) => c.menu)?.menu;
+  return menu?.fresh && !(choices ?? []).some((c) => c.ticket) && Object.keys(menu.items).length ? menu : undefined;
+};
+
+/** What tapping an item on a menu sends. */
+export const orderAsk = (venue: string, item: string) => `Order the ${item} from ${venue}`;
 
 /**
  * An order Wally built, ready for the person to pay on the restaurant's own
@@ -191,7 +220,7 @@ export function asPlainText(message: Pick<ChatMessage, "content" | "choices">): 
     const link = c.place?.website ?? c.place?.maps ?? c.url;
     return `${i + 1}. ${c.title}${facts.length ? ` (${facts.join(", ")})` : ""}${c.detail ? `: ${c.detail}` : ""}${link ? ` ${link}` : ""}`;
   });
-  return [message.content, ...list, carried && menuLines(carried)].filter(Boolean).join("\n");
+  return [withoutMenuNote(message.content), ...list, carried && menuLines(carried)].filter(Boolean).join("\n");
 }
 
 /**
@@ -250,7 +279,7 @@ export function asTexts(message: Pick<ChatMessage, "content" | "choices">, origi
   });
   // Every set of options closes with the way into the same conversation on the website.
   const more = `${offersClosed(message.choices) ? `${closedLine(asideOf(message.choices)?.closed)}\n` : ""}${offersFastFood(message.choices) ? `${FAST_FOOD_LINE}\n` : ""}Visit Wally for more options: ${tidyLink(`${origin}/ask`)}${sayInSync ? "\nIt's this same conversation, always in sync with our texts." : ""}`;
-  return [message.content.trim(), cards.length ? `${cards.join("\n\n")}\n\n${more}` : ""].filter(Boolean);
+  return [withoutMenuNote(message.content), cards.length ? `${cards.join("\n\n")}\n\n${more}` : ""].filter(Boolean);
 }
 
 /** How long texting must have been quiet before Wally mentions the website again. */
