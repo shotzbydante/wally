@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { asPlainText, asTexts, decodeCid, encodeCid, mapLinkFor, shortMapLink, textDeliveryLinks, isOwnSite, tidyLink, webNudgeDue, splitSources, withSources, type ChatMessage } from "@/lib/chat";
-import { describePlaces, readChoices, readWeb, timeNote, toClaudeMessages, withHistoryCache, withNote, type FoundPlace } from "./agent";
+import { describePlaces, namedSite, pickNamed, readChoices, sameSite, readWeb, timeNote, toClaudeMessages, withHistoryCache, withNote, type FoundPlace } from "./agent";
 
 const message = (id: number, role: ChatMessage["role"], content: string, choices: ChatMessage["choices"] = null): ChatMessage => ({
   id,
@@ -245,5 +245,47 @@ describe("the local time note", () => {
     const sent = withNote(withHistoryCache(later), 0, "note");
     expect(sent[0]).toEqual({ role: "user", content: [{ type: "text", text: "tacos" }, { type: "text", text: "note" }] });
     expect(sent[2]!.content).toEqual([{ type: "tool_result", tool_use_id: "t1", content: "[]", ...cache }]);
+  });
+});
+
+describe("several places sharing a name", () => {
+  const fresno = { name: "Di Cicco's Italian Restaurant", website: "https://www.diciccosfresno.com/", miles: 2.1 };
+  const clovis = { name: "DiCicco's Italian Restaurant", website: "https://diciccos.com/clovis", miles: 6.4 };
+  const madera = { name: "DiCicco's", website: null, miles: 22 };
+
+  it("reads a site the way a person types it", () => {
+    expect(namedSite("DiCiccos.com")).toBe("https://DiCiccos.com");
+    expect(namedSite(" https://diciccos.com/menu ")).toBe("https://diciccos.com/menu");
+    // Not a site: a phrase, nothing, or a marketplace page Wally doesn't read.
+    expect(namedSite("their website")).toBeUndefined();
+    expect(namedSite("")).toBeUndefined();
+    expect(namedSite(undefined)).toBeUndefined();
+    expect(namedSite("doordash.com/store/diciccos")).toBeUndefined();
+  });
+
+  it("tells two sites apart whatever the page, www or case", () => {
+    expect(sameSite("https://www.DiCiccos.com/clovis", "https://diciccos.com")).toBe(true);
+    expect(sameSite("https://diciccosfresno.com", "https://diciccos.com")).toBe(false);
+    expect(sameSite(null, "https://diciccos.com")).toBe(false);
+  });
+
+  it("takes the nearest when nothing says which, and keeps the others to offer", () => {
+    const { place, others, matched } = pickNamed([madera, clovis, fresno]);
+    expect(place).toBe(fresno);
+    expect(others).toEqual([madera, clovis]);
+    expect(matched).toBe(true);
+  });
+
+  it("lets the site the person named decide, over the nearest", () => {
+    const { place, others, matched } = pickNamed([fresno, clovis, madera], "https://DiCiccos.com");
+    expect(place).toBe(clovis);
+    expect(others).toEqual([fresno, madera]);
+    expect(matched).toBe(true);
+  });
+
+  it("says so when no place lists the site that was named", () => {
+    expect(pickNamed([fresno, madera], "https://diciccos.com")).toMatchObject({ place: fresno, matched: false });
+    expect(pickNamed([], "https://diciccos.com")).toEqual({ others: [], matched: false });
+    expect(pickNamed([])).toEqual({ others: [], matched: true });
   });
 });

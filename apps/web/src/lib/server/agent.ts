@@ -70,6 +70,8 @@ const MENUS = `# Menus
 - When someone asks what a place serves, about a dish, what's in it, sizes, calories, prices, or wants to "tee up" or order something somewhere you can't build the order, call read_menu with the restaurant's name as it appears on a card or as they said it, and what they're asking about in looking_for. It reads the restaurant's own website (never a delivery app), or, for the big chains, the menu Wally keeps. A place that isn't on any card is looked up by its name, wherever it is, so call read_menu straight away rather than searching for the place first. Then answer from what it returns, in your own words, and name the source in passing ("from their site", "on McDonald's menu").
 - Menu answers are the one place you lay things out as a list. Open with one short line, then put each item on its own line starting with "• " (a bullet, a space): the item's name, then a dash and a few words on what it is, with the price when read_menu gave one and calories for a chain. Up to eight items for a question about one kind of thing; up to twenty when they ask for the whole menu. Then, if anything's worth saying, one closing line. These answers may run to 120 words; keep each line short, since it is read on a phone. No other markdown: no asterisks, headings or links in the lines.
 - Say only what read_menu returned. A price from a site can be out of date, and a chain's prices vary by location: say so in a few words when you quote one, and never quote a price read_menu didn't give. Calories are the chain's own published figures.
+- One name can belong to several places: a family's restaurants in different towns, the branches of a local group. When read_menu or find_menu returns other_locations, its answer is about one of them only (restaurant and where). Unless the person already said which, never assume: say which one you looked at by its town or street, and name the others in a few words so they can pick, or show them all with show_places using the ids given. Never speak of them as one place.
+- When the person names a website ("the one from diciccos.com"), pass it as website. It decides which place they mean, even over a card. If the result came from a different site (site_named_not_matched), say so plainly; never tell them a place is "the one" when its site is another address.
 - When read_menu says the site can't be read (it's a PDF, an ordering platform's page, or nothing menu-like), say so plainly and point to the Website link on the card, or the PDF it names.
 - When the person names a well-known national chain, call read_menu before find_menu; it says whether Wally can build orders there. For one that doesn't take orders through Wally, never ask for a ZIP: describe what they asked for from the menu, say that ordering is through the chain's own app or the delivery apps on its card, and offer to find the nearest one that's open now. That is the whole answer; no apology.`;
 
@@ -231,6 +233,7 @@ const FIND_MENU_TOOL: Anthropic.Tool = {
       restaurant: { type: "string", description: "The restaurant's name, as the person said it or as it appears on a place card." },
       dish: { type: "string", description: "What they want, in a few words: 'poke bowl', 'pepperoni pizza', 'latte'." },
       zip: { type: "string", description: "A 5-digit ZIP the person typed in this conversation. Leave it out when they have a saved address or are sharing their location; the search works from that." },
+      website: { type: "string", description: "The restaurant's own site, only when the person named one. It picks the right place when several share the name." },
     },
     required: ["restaurant", "dish"],
   },
@@ -270,7 +273,7 @@ const READ_MENU_TOOL: Anthropic.Tool = {
     properties: {
       restaurant: { type: "string", description: "The restaurant's name, as on its card or as the person said it." },
       looking_for: { type: "string", description: "What they're asking about, in a few words: 'quarter pounder', 'vegetarian options', 'brunch prices'. Leave out for the whole menu." },
-      website: { type: "string", description: "The restaurant's own site, only if the person gave it and it isn't on any card." },
+      website: { type: "string", description: "The restaurant's own site, whenever the person named one (\"diciccos.com\", \"the one from their .com site\"). It decides which place they mean when several share the name, even over a card. Leave it out otherwise." },
     },
     required: ["restaurant"],
   },
@@ -374,6 +377,36 @@ export const storeMatches = (wanted: string, store: Pick<Venue, "name">) => name
 
 /** Whether a listing is the kind that serves food or drink, by Google's own words for what it is ("Coffee shop", not "Apartment building"). */
 export const servesFood = (place: Pick<Place, "kind">) => /restaurant|caf[eé]|coffee|espresso|tea|bar\b|pub\b|bakery|patisserie|food|grill|pizza|kitchen|diner|deli|eatery|juice|smoothie|dessert|ice cream|gelato|donut|doughnut|taco|taqueria|sushi|ramen|noodle|burger|sandwich|bistro|brasserie|brunch|breakfast|steak|seafood|bbq|barbecue|wine|brew|cocktail|lounge|creperie|bagel|bubble tea|boba|chicken|wings|hot dog|cantina|trattoria|osteria|izakaya|pho|dumpling|dim sum|shawarma|kebab|falafel|poke|salad|vegan|vegetarian|market|takeout|take-out|fast food|chocolate|candy|cupcake|cookie|pastry|confection|caterer|buffet/i.test(place.kind);
+
+/**
+ * A site the person named, as an address: "DiCiccos.com" becomes
+ * "https://DiCiccos.com". Undefined when it isn't something a restaurant's own
+ * site could be (a marketplace, an ordering platform, a phrase).
+ */
+export function namedSite(given: unknown): string | undefined {
+  if (typeof given !== "string") return undefined;
+  const raw = given.trim();
+  if (!raw || /\s/.test(raw)) return undefined;
+  const url = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
+  return readableSite(url) ? url : undefined;
+}
+
+/** Whether two addresses are on the same site, whatever the page, "www." or letter case. */
+export const sameSite = (a: string | null | undefined, b: string | null | undefined) => Boolean(a && b && hostOf(a) && hostOf(a).toLowerCase() === hostOf(b).toLowerCase());
+
+/**
+ * Which of several places sharing a name is meant, and the rest. The one whose
+ * listed site is the site the person named wins; otherwise the nearest (or the
+ * first, when no distance is known). `matched` is false when a site was named
+ * and none of them lists it.
+ */
+export function pickNamed<T extends { website?: string | null; miles?: number }>(places: T[], site?: string): { place?: T; others: T[]; matched: boolean } {
+  if (!places.length) return { others: [], matched: !site };
+  const bySite = site ? places.find((p) => sameSite(p.website, site)) : undefined;
+  const nearest = [...places].sort((a, b) => (a.miles ?? Infinity) - (b.miles ?? Infinity))[0]!;
+  const place = bySite ?? nearest;
+  return { place, others: places.filter((p) => p !== place), matched: !site || Boolean(bySite) };
+}
 
 /** The street line of a listing's address ("133 S La Brea Ave" from "133 S La Brea Ave, Los Angeles"), when it starts with a street number; what a by-name store lookup needs. */
 export function streetOf(address: string | null | undefined): string | undefined {
@@ -818,20 +851,51 @@ export async function reply(thread: ChatMessage[], guest: Guest, channel: Channe
   };
 
   /**
-   * A restaurant someone named that no card holds, by one Places search for
-   * the name, leaning toward where they are. It joins this turn's results, so
-   * show_places could draw its card. Null when nothing by that name turns up.
+   * The restaurants by a name someone gave that no card holds, by one Places
+   * search for the name, leaning toward where they are. Every place that
+   * serves food and answers to the name comes back, nearest first: a name is
+   * often several places (a family's restaurants in different towns), and
+   * picking one silently answered "DiCicco's" with a single location. They
+   * all join this turn's results, so show_places can draw their cards. Empty
+   * when nothing by that name turns up.
    */
-  const lookUpByName = async (name: string): Promise<FoundPlace | null> => {
-    const places = await searchPlaces({ query: name, bias: guest.near, limit: 5, travel: guest.near ? { from: guest.near, mode: "DRIVE" } : null }).catch(() => [] as Place[]);
-    // A bare name can match anything ("Marlowe" is also an apartment building): a place that serves food comes first, then any whose name fits.
+  const lookUpByName = async (name: string): Promise<FoundPlace[]> => {
+    const places = await searchPlaces({ query: name, bias: guest.near, limit: 8, travel: guest.near ? { from: guest.near, mode: "DRIVE" } : null }).catch(() => [] as Place[]);
+    // A bare name can match anything ("Marlowe" is also an apartment building): places that serve food and carry the name, else the best single guess as before.
     const named = places.filter((p) => nameMatches(name, p.name) || nameMatches(p.name, name));
-    const place = named.find((p) => servesFood(p)) ?? places.find((p) => servesFood(p)) ?? named[0] ?? places[0];
-    if (!place) return null;
-    const id = `p${found.size + 1}`;
-    const hit: FoundPlace = { ...place, ...(guest.near && place.point ? { miles: milesBetween(guest.near, place.point) } : {}), ...(shown.has(place.id) ? { shown: true } : {}) };
-    found.set(id, hit);
-    return hit;
+    const fitting = named.filter((p) => servesFood(p));
+    const single = places.find((p) => servesFood(p)) ?? named[0] ?? places[0];
+    const picked = fitting.length ? fitting : single ? [single] : [];
+    const hits = picked.map((place): FoundPlace => {
+      const already = [...found.values()].find((f) => f.id === place.id);
+      if (already) return already;
+      const hit: FoundPlace = { ...place, ...(guest.near && place.point ? { miles: milesBetween(guest.near, place.point) } : {}), ...(shown.has(place.id) ? { shown: true } : {}) };
+      found.set(`p${found.size + 1}`, hit);
+      return hit;
+    });
+    return hits.sort((a, b) => (a.miles ?? Infinity) - (b.miles ?? Infinity));
+  };
+
+  /** Every place this turn knows by that name: its search results, else a lookup by name. */
+  const placesNamed = async (name: string): Promise<FoundPlace[]> => {
+    const have = [...found.values()].filter((p) => nameMatches(name, p.name) || nameMatches(p.name, name));
+    return have.length || !placesConfigured() ? have : lookUpByName(name);
+  };
+
+  /** The other places sharing a name, for Claude: enough to tell them apart and to show their cards. */
+  const describeOthers = (others: FoundPlace[]) => {
+    if (!others.length) return {};
+    const idOf = (place: FoundPlace) => [...found.entries()].find(([, f]) => f === place)?.[0];
+    return {
+      other_locations: others.slice(0, 6).map((p) => ({
+        id: idOf(p),
+        name: p.name,
+        where: [streetOf(p.address), cityOf(p.address)].filter(Boolean).join(", ") || undefined,
+        ...(p.miles !== undefined ? { miles: Math.round(p.miles * 10) / 10 } : {}),
+        ...(p.website && hostOf(p.website) ? { site: hostOf(p.website) } : {}),
+      })),
+      same_name_note: "Other places share this name. Unless the person already said which one, don't assume: say which this is by its town or street and name the others briefly, or show them with show_places.",
+    };
   };
 
   /** Runs one read_menu call: a kept chain menu, or the restaurant's own site, found by name among the places on cards, or looked up by name. */
@@ -851,23 +915,34 @@ export async function reply(thread: ChatMessage[], guest: Guest, channel: Channe
         }),
       };
     }
-    // The site: this turn's search results first, then earlier cards, then one the person gave, then the place's own listing, looked up by name (leaning toward where they are, but not held to it: the place they name may be in another city).
-    const fromSearch = [...found.values()].find((p) => nameMatches(name, p.name) || nameMatches(p.name, name));
-    const fromCards = shownSites(thread).find((p) => nameMatches(name, p.name) || nameMatches(p.name, name));
-    const given = typeof args.website === "string" && readableSite(args.website.trim()) ? args.website.trim() : undefined;
-    const fromListing = !fromSearch && !fromCards && !given && placesConfigured() ? await lookUpByName(name) : null;
-    const website = fromSearch?.website ?? fromCards?.website ?? given ?? fromListing?.website ?? (typeof args.website === "string" ? args.website.trim() : undefined);
-    const known = fromSearch?.name ?? fromCards?.name ?? fromListing?.name ?? name;
-    if (!website) return { content: JSON.stringify({ restaurant: known, readable: false, note: fromSearch || fromCards || fromListing ? "This place lists no website, so its menu can't be read. Point to the delivery app chips on its card, or offer to find it with find_places." : "No listing was found for that name. Ask the person, in one short line, where it is or for its website." }) };
-    if (!readableSite(website)) return { content: JSON.stringify({ restaurant: known, readable: false, website, note: "Its listed site is an ordering platform or marketplace page, which Wally doesn't read. Point the person to the Website link on its card for the menu." }) };
+    // Which place, and so which site. A site the person named decides it, even over a card: "the DiCicco's from diciccos.com" is not the DiCicco's whose card says diciccosfresno.com.
+    // Otherwise this turn's search results, then earlier cards, then the place's own listing looked up by name (leaning toward where they are, but not held to it: the place they name may be in another city).
+    const given = namedSite(args.website);
+    const fromCards = shownSites(thread).filter((p) => nameMatches(name, p.name) || nameMatches(p.name, name));
+    const card = given ? fromCards.find((p) => sameSite(p.website, given)) : fromCards[0];
+    const inSearch = [...found.values()].some((p) => nameMatches(name, p.name) || nameMatches(p.name, name));
+    // A card settles it without a lookup, unless the person named a site that card doesn't have.
+    const listed = inSearch || !card ? await placesNamed(name) : [];
+    const { place, others, matched } = pickNamed(listed, given);
+    const fromListing = matched ? place : undefined;
+    const website = given ?? fromListing?.website ?? card?.website ?? undefined;
+    const known = fromListing?.name ?? card?.name ?? name;
+    const where = fromListing ? [streetOf(fromListing.address), cityOf(fromListing.address)].filter(Boolean).join(", ") || undefined : undefined;
+    // Named a site no listing has: the menu is read from that site, and Claude is told the listings are other places.
+    const unmatched = given && !fromListing && !card && listed.length ? { site_named_not_matched: true, site_note: `No listing by this name has the site ${hostOf(given)}. What follows is about that site only; the places in other_locations are different addresses and may be different restaurants. Say so, and never call one of them "the one".` } : {};
+    const rest = describeOthers(matched ? others : listed);
+    const about = { restaurant: known, ...(where ? { where } : {}), ...unmatched, ...rest };
+    if (!website) return { content: JSON.stringify({ ...about, readable: false, note: fromListing || card ? "This place lists no website, so its menu can't be read. Point to the delivery app chips on its card, or offer to find it with find_places." : "No listing was found for that name. Ask the person, in one short line, where it is or for its website." }) };
+    if (!readableSite(website)) return { content: JSON.stringify({ ...about, readable: false, website, note: "Its listed site is an ordering platform or marketplace page, which Wally doesn't read. Point the person to the Website link on its card for the menu." }) };
     const menu = await readSiteMenu(website);
-    if (!menu) return { content: JSON.stringify({ restaurant: known, readable: false, website, note: "Nothing menu-like could be read from the site. Point the person to the Website link on its card." }) };
+    if (!menu) return { content: JSON.stringify({ ...about, readable: false, website, note: given ? `Nothing menu-like could be read from ${hostOf(given)}. Say that plainly, by that site's name; don't swap in another restaurant's site.` : "Nothing menu-like could be read from the site. Point the person to the Website link on its card." }) };
     const orders = canOrder && (await orderableStores().catch(() => [] as Venue[])).some((v) => storeMatches(known, v));
     const text = lookingFor ? pickLines(menu.text, lookingFor) : menu.text;
     return {
       content: JSON.stringify({
-        restaurant: known,
+        ...about,
         readable: true,
+        website,
         menu_source: menu.source,
         ...(menu.items.length ? { items: menu.items.slice(0, 120) } : {}),
         ...(text ? { menu_text: text } : {}),
@@ -886,7 +961,7 @@ export async function reply(thread: ChatMessage[], guest: Guest, channel: Channe
    * of dozen at most and a named place is usually not among them.
    */
   const findMenu = async (input: unknown): Promise<{ content: string; is_error?: boolean }> => {
-    const args = (input ?? {}) as { restaurant?: unknown; dish?: unknown; zip?: unknown };
+    const args = (input ?? {}) as { restaurant?: unknown; dish?: unknown; zip?: unknown; website?: unknown };
     const restaurant = clip(args.restaurant, 80);
     const dish = clip(args.dish, 80);
     if (!restaurant || !dish) return { content: "Give the restaurant and the dish.", is_error: true };
@@ -900,16 +975,19 @@ export async function reply(thread: ChatMessage[], guest: Guest, channel: Channe
       const stores = zip ? await orderableStores(args.zip) : [];
       let store = stores.find((s) => storeMatches(restaurant, s));
       let entries: MenuEntry[] | undefined;
+      // Which place was looked at, and the others by the same name, so Claude never answers for "DiCicco's" as if there were one.
+      let about: Record<string, unknown> = {};
       if (!store && ordering.lookup) {
         // By name and street address, with the dish as the query, so the menu search rides on the same call.
-        const place = [...found.values()].find((p) => nameMatches(restaurant, p.name) || nameMatches(p.name, restaurant)) ?? (placesConfigured() ? await lookUpByName(restaurant) : null);
+        const { place, others } = pickNamed(await placesNamed(restaurant), namedSite(args.website));
         const street = streetOf(place?.address);
         const hit = place && street ? await ordering.lookup({ name: place.name, address: street }, dish) : null;
         if (hit) ({ venue: store, entries } = hit);
+        if (place) about = { restaurant: place.name, where: [street, cityOf(place.address)].filter(Boolean).join(", ") || undefined, ...(place.website && hostOf(place.website) ? { site: hostOf(place.website) } : {}), ...describeOthers(others) };
       }
       if (!store) {
         const names = stores.slice(0, 6).map((s) => s.name);
-        return { content: JSON.stringify({ takes_orders: false, note: "This restaurant isn't set up for ordering through Wally (it isn't in the ordering directory Wally can build carts from). Say so in one line and point the person to its own site or the delivery apps on its card; never say it doesn't take orders at all.", nearby_that_do: names }) };
+        return { content: JSON.stringify({ ...about, takes_orders: false, note: "This restaurant isn't set up for ordering through Wally (it isn't in the ordering directory Wally can build carts from). Say so in one line and point the person to its own site or the delivery apps on its card; never say it doesn't take orders at all.", nearby_that_do: names }) };
       }
       entries ??= await ordering.menu(store.id, dish);
       menu = menuFound(store, entries);
