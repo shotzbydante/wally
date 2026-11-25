@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { asPlainText, asTexts, decodeCid, encodeCid, mapLinkFor, shortMapLink, textDeliveryLinks, isOwnSite, tidyLink, webNudgeDue, splitSources, withSources, type ChatMessage } from "@/lib/chat";
+import { asPlainText, asTexts, linkParts, decodeCid, encodeCid, mapLinkFor, shortMapLink, textDeliveryLinks, isOwnSite, tidyLink, webNudgeDue, splitSources, withSources, type ChatMessage } from "@/lib/chat";
 import { describePlaces, isAt, namedSite, pickNamed, storeNames, readChoices, sameSite, readWeb, timeNote, toClaudeMessages, withHistoryCache, withNote, type FoundPlace } from "./agent";
 
 const message = (id: number, role: ChatMessage["role"], content: string, choices: ChatMessage["choices"] = null): ChatMessage => ({
@@ -307,5 +307,29 @@ describe("several places sharing a name", () => {
     expect(storeNames("DiCicco's Italian Restaurant - Shields", "DiCicco's")).toEqual(["DiCicco's Italian Restaurant - Shields", "DiCicco's Italian Restaurant", "DiCicco's"]);
     expect(storeNames("Marlowe (Wilshire)", "Marlowe")).toEqual(["Marlowe (Wilshire)", "Marlowe"]);
     expect(storeNames("Go Get Em Tiger", "Go Get Em Tiger")).toEqual(["Go Get Em Tiger"]);
+  });
+});
+
+describe("tappable sites and phone numbers in Wally's words", () => {
+  it("links a phone number and a bare site address, and leaves the sentence alone", () => {
+    expect(linkParts("Order on diciccos.com, or call (559) 291-9800.")).toEqual([
+      { text: "Order on " },
+      { text: "diciccos.com", href: "https://diciccos.com" },
+      { text: ", or call " },
+      { text: "(559) 291-9800", href: "tel:+15592919800" },
+      { text: "." },
+    ]);
+  });
+
+  it("reads the other ways a number and a site are written", () => {
+    expect(linkParts("559-291-9800")[0]).toEqual({ text: "559-291-9800", href: "tel:+15592919800" });
+    expect(linkParts("+1 559 291 9800")[0]!.href).toBe("tel:+15592919800");
+    expect(linkParts("see https://www.diciccos.com/menu.")[1]).toEqual({ text: "https://www.diciccos.com/menu", href: "https://www.diciccos.com/menu" });
+  });
+
+  it("links nothing else", () => {
+    for (const plain of ["Two pizzas for $25.99, ready by 7.", "Write to hello@diciccos.com", "Open 11 to 9. Closed Monday.", "Calories: 1200-1450"]) {
+      expect(linkParts(plain).some((p) => p.href)).toBe(false);
+    }
   });
 });

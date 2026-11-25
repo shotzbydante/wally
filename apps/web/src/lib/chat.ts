@@ -417,3 +417,35 @@ export function cityOf(address: string | null | undefined): string | undefined {
 
 /** How long after an answer its "open" and "closed" badges are still worth showing. */
 export const OPEN_BADGE_MINUTES = 30;
+
+/** A piece of Wally's sentence: plain words, or a phone number or site address to make tappable. */
+export interface TextPart {
+  text: string;
+  href?: string;
+}
+
+const PHONE = String.raw`(?:\+?1[ .-]?)?\(?\b\d{3}\)?[ .-]\d{3}[ .-]\d{4}\b`;
+const SITE = String.raw`(?<![@\w.-])(?:https?:\/\/)?(?:[a-z0-9-]+\.)+(?:com|net|org|co|us|biz|info|pizza|restaurant|cafe|menu|kitchen|bar|food|eat)\b(?:\/[^\s,;)]*)?`;
+
+/**
+ * Splits a message into words and the phone numbers and site addresses in
+ * them, so the page can make those tappable the way a phone's Messages app
+ * does on its own. Wally writes a restaurant's site and number into his
+ * sentence when he can't build its order, and both are useless as plain
+ * words on a phone. Nothing else is linked: no email, no path without a site.
+ */
+export function linkParts(text: string): TextPart[] {
+  const parts: TextPart[] = [];
+  const find = new RegExp(`(${PHONE})|(${SITE})`, "gi");
+  let at = 0;
+  for (const m of text.matchAll(find)) {
+    // A sentence's own full stop is not part of the address.
+    const hit = m[0].replace(/[.!?]+$/, "");
+    if (m.index > at) parts.push({ text: text.slice(at, m.index) });
+    const digits = hit.replace(/\D/g, "");
+    parts.push(m[1] ? { text: hit, href: `tel:+1${digits.slice(-10)}` } : { text: hit, href: /^https?:\/\//i.test(hit) ? hit.replace(/^http:/i, "https:") : `https://${hit}` });
+    at = m.index + hit.length;
+  }
+  if (at < text.length) parts.push({ text: text.slice(at) });
+  return parts;
+}

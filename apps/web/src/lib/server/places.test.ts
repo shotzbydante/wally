@@ -43,19 +43,19 @@ describe("findAddress", () => {
 });
 
 describe("searchPlaces", () => {
-  const raw = { id: "abc", displayName: { text: " Milk Bar " }, shortFormattedAddress: "7150 Melrose Ave", primaryTypeDisplayName: { text: "Dessert shop" }, editorialSummary: { text: " Playful bakery known for cereal milk soft serve. " }, location: { latitude: 34.08, longitude: -118.34 }, currentOpeningHours: { openNow: true, nextCloseTime: "2026-10-13T04:00:00Z" }, rating: 4.5, userRatingCount: 812, priceLevel: "PRICE_LEVEL_MODERATE", websiteUri: "https://milkbarstore.com/", googleMapsUri: "https://maps.google.com/?cid=1", takeout: true, delivery: false, dineIn: true, timeZone: { id: "America/Los_Angeles" } };
+  const raw = { id: "abc", displayName: { text: " Milk Bar " }, shortFormattedAddress: "7150 Melrose Ave", primaryTypeDisplayName: { text: "Dessert shop" }, editorialSummary: { text: " Playful bakery known for cereal milk soft serve. " }, location: { latitude: 34.08, longitude: -118.34 }, currentOpeningHours: { openNow: true, nextCloseTime: "2026-10-13T04:00:00Z" }, rating: 4.5, userRatingCount: 812, priceLevel: "PRICE_LEVEL_MODERATE", websiteUri: "https://milkbarstore.com/", nationalPhoneNumber: " (323) 555-0142 ", googleMapsUri: "https://maps.google.com/?cid=1", takeout: true, delivery: false, dineIn: true, timeZone: { id: "America/Los_Angeles" } };
   const none = { takeout: null, delivery: null, dineIn: null, reservable: null, timeZone: null };
 
   it("leans toward the saved address and tidies what comes back", async () => {
     const calls = google([raw, { ...raw, id: "gone", businessStatus: "CLOSED_PERMANENTLY" }, { id: "bare", displayName: { text: "Bare" }, websiteUri: "javascript:alert(1)" }]);
     expect(await searchPlaces({ query: "dessert near me", near: home, openNow: true })).toEqual([
-      { id: "abc", name: "Milk Bar", address: "7150 Melrose Ave", kind: "Dessert shop", summary: "Playful bakery known for cereal milk soft serve.", point: { lat: 34.08, lng: -118.34 }, open: true, closes: "2026-10-13T04:00:00Z", rating: 4.5, ratings: 812, price: "$$", website: "https://milkbarstore.com/", maps: "https://maps.google.com/?cid=1", takeout: true, delivery: false, dineIn: true, reservable: null, timeZone: "America/Los_Angeles" },
-      { id: "bare", name: "Bare", address: "", kind: "", summary: null, point: null, open: null, closes: null, rating: null, ratings: null, price: null, website: null, maps: "https://www.google.com/maps/place/?q=place_id:bare", ...none },
+      { id: "abc", name: "Milk Bar", address: "7150 Melrose Ave", kind: "Dessert shop", summary: "Playful bakery known for cereal milk soft serve.", point: { lat: 34.08, lng: -118.34 }, open: true, closes: "2026-10-13T04:00:00Z", rating: 4.5, ratings: 812, price: "$$", website: "https://milkbarstore.com/", phone: "(323) 555-0142", maps: "https://maps.google.com/?cid=1", takeout: true, delivery: false, dineIn: true, reservable: null, timeZone: "America/Los_Angeles" },
+      { id: "bare", name: "Bare", address: "", kind: "", summary: null, point: null, open: null, closes: null, rating: null, ratings: null, price: null, website: null, phone: null, maps: "https://www.google.com/maps/place/?q=place_id:bare", ...none },
     ]);
     // Held to a box about 25 miles each way, so a bigger city far away can't answer.
     expect(calls[0]!.body).toEqual({ textQuery: "dessert", pageSize: 20, openNow: true, locationRestriction: { rectangle: { low: { latitude: 33.7016, longitude: -118.7966 }, high: { latitude: 34.4262, longitude: -117.9218 } } } });
     // The service flags and time zone ride in the same billing tier; no routing was asked for.
-    expect(calls[0]!.headers["X-Goog-FieldMask"]).toMatch(/places\.takeout,places\.delivery,places\.dineIn,places\.reservable,places\.timeZone$/);
+    expect(calls[0]!.headers["X-Goog-FieldMask"]).toMatch(/places\.takeout,places\.delivery,places\.dineIn,places\.reservable,places\.timeZone,places\.nationalPhoneNumber$/);
   });
   it("asks Google how long each place takes to reach, and keeps the answers in step with the places", async () => {
     const calls = google(
@@ -185,7 +185,7 @@ describe("suggestAddresses", () => {
 });
 
 describe("place cards", () => {
-  const place = (id: string, name: string, open: boolean | null, miles?: number): FoundPlace => ({ id, name, address: "1 Main St", kind: "Bakery", summary: null, point: null, open, closes: null, rating: 4.5, ratings: 10, price: null, website: open ? `https://${id}.example/` : null, maps: `https://maps.example/${id}`, takeout: null, delivery: null, dineIn: null, reservable: null, timeZone: null, miles });
+  const place = (id: string, name: string, open: boolean | null, miles?: number): FoundPlace => ({ id, name, address: "1 Main St", kind: "Bakery", summary: null, point: null, open, closes: null, rating: 4.5, ratings: 10, price: null, website: open ? `https://${id}.example/` : null, phone: null, maps: `https://maps.example/${id}`, takeout: null, delivery: null, dineIn: null, reservable: null, timeZone: null, miles });
   const found = new Map<string, FoundPlace>([
     ["p1", place("far", "Far Open", true, 3.2)],
     ["p2", place("closed", "Closed Close", false, 0.1)],

@@ -44,6 +44,8 @@ export interface Place {
   /** "$" to "$$$$", or null. */
   price: string | null;
   website: string | null;
+  /** Its phone number as Google prints it for callers in the country: "(559) 291-9800". Null when the listing has none. Told to the person when Wally can't build the order; never kept on a card. */
+  phone: string | null;
   maps: string;
   /** Whether the place offers takeout, delivery, dining in, or takes reservations. Null when Google doesn't say. */
   takeout: boolean | null;
@@ -79,6 +81,7 @@ interface RawPlace {
   userRatingCount?: number;
   priceLevel?: string;
   websiteUri?: string;
+  nationalPhoneNumber?: string;
   googleMapsUri?: string;
   businessStatus?: string;
   types?: string[];
@@ -330,7 +333,7 @@ export interface PlaceSearch {
 }
 
 /** The place fields a search asks for. Together they put a search in the Enterprise + Atmosphere tier; the service and travel fields ride in that tier for free. */
-const SEARCH_FIELDS = ["id", "displayName", "shortFormattedAddress", "formattedAddress", "primaryTypeDisplayName", "editorialSummary", "location", "currentOpeningHours", "rating", "userRatingCount", "priceLevel", "websiteUri", "googleMapsUri", "businessStatus", "takeout", "delivery", "dineIn", "reservable", "timeZone"];
+const SEARCH_FIELDS = ["id", "displayName", "shortFormattedAddress", "formattedAddress", "primaryTypeDisplayName", "editorialSummary", "location", "currentOpeningHours", "rating", "userRatingCount", "priceLevel", "websiteUri", "googleMapsUri", "businessStatus", "takeout", "delivery", "dineIn", "reservable", "timeZone", "nationalPhoneNumber"];
 
 const flag = (value: boolean | undefined): boolean | null => (typeof value === "boolean" ? value : null);
 
@@ -375,6 +378,7 @@ export async function searchPlaces(search: PlaceSearch): Promise<Place[]> {
       ratings: typeof p.userRatingCount === "number" ? p.userRatingCount : null,
       price: PRICE[p.priceLevel ?? ""] ?? null,
       website: httpsUrl(p.websiteUri),
+      phone: p.nationalPhoneNumber?.trim() || null,
       // The place's page on Google Maps. If Google sent none, the place ID still finds it.
       maps: httpsUrl(p.googleMapsUri) ?? `https://www.google.com/maps/place/?q=place_id:${encodeURIComponent(p.id!)}`,
       takeout: flag(p.takeout),
