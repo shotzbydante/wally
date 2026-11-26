@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cityOf, deliveryLinks, textDeliveryLinks } from "@/lib/chat";
-import { describePlaces, placeChoices, placesIntro, shownPlaces, type FoundPlace } from "./agent";
-import { findAddress, findAnchor, milesBetween, searchPlaces, suggestAddresses, zipAt, zipIn } from "./places";
+import { describePlaces, nearestFirst, placeChoices, placesIntro, shownPlaces, type FoundPlace } from "./agent";
+import { LOCAL_MILES, NEARBY_MILES, findAddress, findAnchor, mergeResults, milesBetween, searchCloseFirst, searchPlaces, suggestAddresses, zipAt, zipIn, type Place } from "./places";
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -296,5 +296,80 @@ describe("deliveryLinks", () => {
     expect(deliveryLinks("Bamboo Chinese", "https://www.doordash.com/store/bamboo-chinese-los-angeles-12345/")[1]!.url).toContain("ubereats.com/search");
     expect(deliveryLinks("Bamboo Chinese", "https://www.doordash.com/")[0]!.url).toContain("/search/store/");
     expect(deliveryLinks("Bamboo Chinese", "https://bamboochinese.com")[0]!.url).toContain("/search/store/");
+  });
+});
+
+describe("searching close first", () => {
+  /** Answers each Places request from `byQuery[textQuery][call number for that query]`, and records the bodies. */
+  function googleByQuery(byQuery: Record<string, unknown[][]>) {
+    const calls: Record<string, unknown>[] = [];
+    const seen: Record<string, number> = {};
+    vi.stubEnv("GOOGLE_MAPS_API_KEY", "key");
+    vi.stubGlobal("fetch", async (_url: string, init: RequestInit) => {
+      const body = JSON.parse(init.body as string) as Record<string, unknown>;
+      calls.push(body);
+      const q = body.textQuery as string;
+      const n = (seen[q] = (seen[q] ?? -1) + 1);
+      return new Response(JSON.stringify({ places: byQuery[q]?.[n] ?? [] }), { status: 200 });
+    });
+    return calls;
+  }
+  const raw = (id: string) => ({ id, displayName: { text: id }, location: { latitude: home.lat, longitude: home.lng } });
+  const span = (body: Record<string, unknown>) => {
+    const box = (body.locationRestriction as { rectangle: { low: { latitude: number }; high: { latitude: number } } }).rectangle;
+    return Math.round(((box.high.latitude - box.low.latitude) * 69) / 2);
+  };
+
+  it("looks a few miles around the saved address, and stops there when that finds enough", async () => {
+    const calls = googleByQuery({ pasta: [["a", "b", "c", "d", "e", "f", "g", "h"].map(raw)] });
+    const { places, widened } = await searchCloseFirst({ query: "pasta", near: home }, ["pasta"], 24);
+    expect(widened).toBe(false);
+    expect(places.map((p) => p.id)).toEqual(["a", "b", "c", "d", "e", "f", "g", "h"]);
+    expect(calls).toHaveLength(1);
+    expect(span(calls[0]!)).toBe(LOCAL_MILES);
+  });
+
+  it("searches the cuisine beside the dish and keeps both searches' best matches", async () => {
+    const calls = googleByQuery({
+      pasta: [["bella-pasta", "olive-garden", "shared", "p4", "p5"].map(raw)],
+      "italian restaurant": [["diciccos", "shared", "anesso", "i4"].map(raw)],
+    });
+    const { places } = await searchCloseFirst({ query: "pasta", near: home }, ["pasta", "italian restaurant"], 24);
+    expect(calls.slice(0, 2).map((c) => c.textQuery).sort()).toEqual(["italian restaurant", "pasta"]);
+    // Each search's first, then each one's second...; a place both found is kept once.
+    expect(places.map((p) => p.id).slice(0, 6)).toEqual(["bella-pasta", "diciccos", "olive-garden", "shared", "anesso", "p4"]);
+  });
+
+  it("reaches out to 25 miles when the close look finds too little, closer places first", async () => {
+    const calls = googleByQuery({ ramen: [["near1", "near2"].map(raw), ["far1", "near1", "far2"].map(raw)] });
+    const { places, widened } = await searchCloseFirst({ query: "ramen", near: home }, ["ramen"], 24);
+    expect(widened).toBe(true);
+    expect(places.map((p) => p.id)).toEqual(["near1", "near2", "far1", "far2"]);
+    expect(calls.map(span)).toEqual([LOCAL_MILES, NEARBY_MILES]);
+  });
+
+  it("searches a named area once, as before", async () => {
+    const calls = googleByQuery({});
+    const { widened } = await searchCloseFirst({ query: "dessert", near: home, area: "Koreatown" }, ["dessert"], 24);
+    expect(widened).toBe(false);
+    expect(calls).toEqual([{ textQuery: "dessert near Koreatown", pageSize: 20 }]);
+  });
+
+  it("caps the merged list", () => {
+    const list = (prefix: string) => Array.from({ length: 20 }, (_, i) => ({ id: `${prefix}${i}` }) as Place);
+    expect(mergeResults([list("a"), list("b")], 24)).toHaveLength(24);
+  });
+});
+
+describe("nearestFirst", () => {
+  it("orders by travel time, then straight-line miles, and leaves places with no distance at the end", () => {
+    const at = (id: string, extra: Partial<FoundPlace>) => [id, { id, name: id, ...extra } as FoundPlace] as const;
+    const found = new Map<string, FoundPlace>([
+      at("p1", { miles: 9.5, travel: { mode: "DRIVE", minutes: 19, miles: 9.5 } }),
+      at("p2", {}),
+      at("p3", { miles: 2.3, travel: { mode: "DRIVE", minutes: 6, miles: 2.3 } }),
+      at("p4", { miles: 3 }),
+    ]);
+    expect(nearestFirst(["p1", "p2", "p3", "p4"], found)).toEqual(["p3", "p4", "p1", "p2"]);
   });
 });

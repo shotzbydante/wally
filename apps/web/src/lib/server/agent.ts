@@ -7,7 +7,7 @@ import { findStoreLinks, storeLinksConfigured } from "./store-links";
 import type { Channel } from "./conversation";
 import type { CartItem, MenuEntry, Venue } from "@wally/core";
 import { isConnectorError, mayHandOff, nameMatches, orderingConfigured, orderingConnector, sameStore, zipOf } from "./ordering";
-import { PlacesError, findAnchor, milesBetween, placesConfigured, searchPlaces, zipAt, type Anchor, type Place, type Point, type TravelMode } from "./places";
+import { LOCAL_MILES, NEARBY_MILES, PlacesError, findAnchor, milesBetween, placesConfigured, searchCloseFirst, searchPlaces, zipAt, type Anchor, type Place, type Point, type TravelMode } from "./places";
 
 /**
  * Wally's brain: one function that reads a thread and answers it with
@@ -49,9 +49,10 @@ const FINDING_WITH_PLACES = `# Finding places
 - Fast food and drive-thrus: when they ask for fast food, a drive-thru, a quick bite, something on the road, or a big chain by kind ("a coffee drive-thru", "burger chains"), call find_places with fast_food true and a plain query ("fast food", "drive-thru coffee", "burgers"). Each result then says which chain it is (chain) and how often that chain has a drive-thru (drive_thru_likely: usually, sometimes, rarely). When they said drive-thru, pick chains marked usually first, then sometimes, and say in the intro which of your picks usually has one; Google doesn't say whether this location does, so never promise it: a few words like "confirm the drive-thru before you go" cover it. A sit-down or independent answer is always offered the quick-service kind next, by the page and by text; you needn't say it yourself.
 - takeout, delivery, dine_in and reservable say what each listing offers. When someone wants pickup, takeout or something to bring home, show places with takeout true (or unknown) and never one marked false; for delivery, likewise with delivery; and say which of your picks offer what in a few words when it decides the choice. A place marked dine_in only is for eating there.
 - If they have no saved address (see the guest notes) and haven't named somewhere, ask them in one short line to add their address in the bar at the top of the page, or to name an area.
-- Results near the saved address are held to about 25 miles around it; around a named spot, a few miles. If nothing fits, say so and offer to look in a named area, or further out.
+- When they ask for a dish or a kind of food rather than a kind of restaurant ("pasta", "tacos", "pho", "a good steak", "dumplings"), also pass cuisine: the kind of restaurant best known for it ("italian restaurant", "mexican restaurant", "vietnamese restaurant", "steakhouse"). Both are searched together, so the restaurants known for that cuisine aren't missed beside the places that happen to list the dish. Leave cuisine out when the query is already a kind of restaurant, a restaurant's name, or fast food.
+- Near the saved address, the search looks within a few miles first and reaches out to about 25 miles only when little turns up; around a named spot, a few miles. Results come nearest first. If nothing fits, say so and offer to look in a named area, or further out.
 - Don't announce that you're going to look. Just call the tool.
-- Then call show_places with the ids of the four that fit best (fewer only if fewer fit). Open now comes first: pick from the places that are open, and leave closed ones off unless nothing that fits is open (then show the best closed ones and say plainly that they're closed right now). Say in the intro that your picks are open now, with the closing time of the top pick when you have it. Closed places that fit are offered to the person automatically under the cards; when they ask for them ("the ones that aren't open right now too"), call find_places again and show the best of the closed ones, each marked closed, with when they open if you know it (you usually don't: say to check). For each place give a few words on what it is or is known for. The card already shows distance, open or closed, rating and price, so never repeat those in a card's line.
+- Then call show_places with the ids of the four that fit best (fewer only if fewer fit). Open now comes first: pick from the places that are open, and leave closed ones off unless nothing that fits is open (then show the best closed ones and say plainly that they're closed right now). Say in the intro that your picks are open now, with the closing time of the top pick when you have it. Closed places that fit are offered to the person automatically under the cards; when they ask for them ("the ones that aren't open right now too"), call find_places again and show the best of the closed ones, each marked closed, with when they open if you know it (you usually don't: say to check). Among the places that fit, the closer one wins: never pass over a nearby place that fits for one farther away unless the farther one is clearly better for what they asked, and then say why in the intro. For each place give a few words on what it is or is known for. The card already shows distance, open or closed, rating and price, so never repeat those in a card's line.
 - Every show_places call must carry your recommendation in its intro field. It is shown above the cards, and cards never go out without it. Don't also type it as a message before the tool.
 - The intro is one or two sentences, under 40 words (up to 70, in three sentences, when the search was around a named spot, so the walk-or-drive picture and the quality of the picks both fit), in your own voice: a waiter who has opinions and enjoys this. Lead with your top pick by name and why, using what find_places told you (what it's known for, it's the closest, it's still open and until when, it's the best rated, its price). You may add one more standout. A little warmth or wit is welcome ("If it were my night off, I'd head to..."); a dry list of facts is not. Don't walk through every place; the cards do that.
 - known_for is the listing's own description of a place. When a place has one, use it: say what the place is known for in your recommendation and in its card's reason, in your own few words. It is the only thing you know about what a place serves. If a place has no known_for, don't guess one.
@@ -188,12 +189,13 @@ const CHOICES_TOOL: Anthropic.Tool = {
 const FIND_PLACES_TOOL: Anthropic.Tool = {
   name: "find_places",
   description:
-    "Search real, current listings for places to eat or drink. Returns up to 20 places with an id, name, kind, known_for (what the listing says the place is known for, when it says), distance in miles from the person's saved address (or from the named area: miles_from says which, and walkable marks an easy walk from it), whether it is open right now and when it closes, rating, price, own_site when the restaurant has a site of its own, and already_shown when you have shown it earlier in this conversation. Searches near the saved address unless you pass area.",
+    "Search real, current listings for places to eat or drink. Returns up to 24 places, nearest first, each with an id, name, kind, known_for (what the listing says the place is known for, when it says), distance in miles from the person's saved address (or from the named area: miles_from says which, and walkable marks an easy walk from it), whether it is open right now and when it closes, rating, price, own_site when the restaurant has a site of its own, and already_shown when you have shown it earlier in this conversation. Searches near the saved address unless you pass area.",
   input_schema: {
     type: "object",
     properties: {
       query: { type: "string", description: "What to look for, in a few words: 'dessert', 'ramen', 'late night tacos', or a restaurant's name." },
       area: { type: "string", description: "The place to search around, when the person named one in their latest message: a landmark, venue, theater, stadium, hotel, neighborhood, city or ZIP, as they put it plus the city if they gave one ('Pantages Theatre, Hollywood', 'Silver Lake, Los Angeles', '93720'). Pass it whenever they name somewhere, even with a saved address. Never for 'near me' or 'nearby'." },
+      cuisine: { type: "string", description: "When the query is a dish or a kind of food ('pasta', 'tacos', 'pho'), the kind of restaurant best known for it ('italian restaurant', 'mexican restaurant', 'vietnamese restaurant'). Searched beside the query. Leave out when the query is already a kind of restaurant, a name, or fast food." },
       open_now: { type: "boolean", description: "True to return only places open right now. Use it when they want to eat now." },
       fast_food: { type: "boolean", description: "True when they want fast food, a drive-thru, a quick bite or the big chains. The search is steered to quick-service places and each result says which chain it is and whether that chain usually has a drive-thru." },
     },
@@ -678,6 +680,20 @@ export function describePlaces(found: ReadonlyMap<string, FoundPlace>, ids: stri
   return rows.length ? JSON.stringify(rows) : "No places matched. Tell the person plainly and offer to widen the search.";
 }
 
+/** The most places one find_places call hands Claude, across its searches. */
+export const MAX_FOUND = 24;
+
+/** How far a place is, for ordering: Google's travel time when there is one, else straight-line miles at a city driving pace. */
+const reachMinutes = (p: FoundPlace): number => p.travel?.minutes ?? (p.miles !== undefined ? p.miles * 3 : Number.POSITIVE_INFINITY);
+
+/** Ids nearest first, so what fits close by is what Claude reads first. Places with no distance keep their order, at the end. */
+export function nearestFirst(ids: string[], found: ReadonlyMap<string, FoundPlace>): string[] {
+  return ids.map((id, i) => ({ id, i, at: reachMinutes(found.get(id)!) })).sort((a, b) => a.at - b.at || a.i - b.i).map((r) => r.id);
+}
+
+/** One place in the [places] log line: "DiCicco's (8 min drive)". */
+const placeLog = (p: FoundPlace) => `${p.name} (${travelLine(p.travel) ?? (p.miles !== undefined ? `${p.miles} mi` : "?")}${p.open === false ? ", closed" : ""})`;
+
 /** Open first, then unknown, then closed; nearest first within each. */
 const openRank = (open: boolean | undefined) => (open === true ? 0 : open === undefined ? 1 : 2);
 
@@ -879,9 +895,10 @@ export async function reply(thread: ChatMessage[], guest: Guest, channel: Channe
 
   /** Runs one find_places call and returns what Claude should be told. */
   const findPlaces = async (input: unknown): Promise<{ content: string; is_error?: boolean }> => {
-    const args = (input ?? {}) as { query?: unknown; area?: unknown; open_now?: unknown; fast_food?: unknown };
+    const args = (input ?? {}) as { query?: unknown; area?: unknown; cuisine?: unknown; open_now?: unknown; fast_food?: unknown };
     const query = clip(args.query, 120);
     const area = clip(args.area, 80);
+    const cuisine = clip(args.cuisine, 60);
     if (!query) return { content: "Give a query.", is_error: true };
     if (!guest.near && !area) {
       return { content: "There is no saved address and no area was given. Ask the person to add their address in the bar at the top of the page, or to name a neighborhood, city or ZIP.", is_error: true };
@@ -894,9 +911,12 @@ export async function reply(thread: ChatMessage[], guest: Guest, channel: Channe
       const from = anchor ? anchor.name.slice(0, FROM_CHARS) : undefined;
       // Around a spot someone named, what matters is the walk; from home or across a city, the drive.
       const mode: TravelMode = anchor && !anchor.wide ? "WALK" : "DRIVE";
+      // A dish is searched beside the cuisine known for it, so "pasta" also finds the Italian restaurants that don't say pasta loudest.
+      const queries = [query, ...(cuisine && cuisine.toLowerCase() !== query.toLowerCase() ? [cuisine] : [])];
+      // Near the saved address it looks close first and reaches out only when that finds too little: Google ranks by match, not distance.
       // Places near the saved address are checked against the restaurants Wally can order from (not a named area elsewhere).
-      const [places, stores] = await Promise.all([
-        searchPlaces({ query, area: area || undefined, anchor, near: guest.near, openNow: args.open_now === true, fastFood: args.fast_food === true, travel: origin ? { from: origin, mode } : null }),
+      const [{ places, widened }, stores] = await Promise.all([
+        searchCloseFirst({ query, area: area || undefined, anchor, near: guest.near, openNow: args.open_now === true, fastFood: args.fast_food === true, travel: origin ? { from: origin, mode } : null }, queries, MAX_FOUND),
         area ? [] : orderableStores(),
       ]);
       const ids = places.map((place) => {
@@ -908,7 +928,11 @@ export async function reply(thread: ChatMessage[], guest: Guest, channel: Channe
       // An orderable store named for what was asked ("Poke Bar" for "poke") belongs in the answer even when Google's twenty left it out.
       const missed = stores.filter((store) => storeNamedFor(store, query) && !places.some((place) => sameStore(place, store)));
       ids.push(...(await orderablePlaces(missed, MAX_NAMED_ORDERABLE)));
-      return { content: describePlaces(found, ids, guest.timeZone) };
+      const ordered = origin ? nearestFirst(ids, found) : ids;
+      // What came back, so "why wasn't X there?" can be answered from the logs. Place names only: never the person's address.
+      const reach = area ? `around "${area}"` : `near the saved location, ${widened ? `widened to ${NEARBY_MILES}` : `within ${LOCAL_MILES}`} mi`;
+      console.log(`[places] "${query}"${queries.length > 1 ? ` + "${cuisine}"` : ""} ${reach}: ${ordered.length} found: ${ordered.map((id) => placeLog(found.get(id)!)).join("; ")}`);
+      return { content: describePlaces(found, ordered, guest.timeZone) };
     } catch (error) {
       if (!(error instanceof PlacesError)) throw error;
       return { content: "The places search isn't responding. Tell the person plainly that you couldn't look it up just now.", is_error: true };
