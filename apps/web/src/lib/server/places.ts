@@ -259,8 +259,19 @@ export async function suggestAddresses(typed: string, options: { near?: Point | 
     .map((p) => ({ text: tidy(p!.text!.text), main: tidy(p!.structuredFormat?.mainText?.text) || tidy(p!.text!.text), secondary: tidy(p!.structuredFormat?.secondaryText?.text) }));
 }
 
-/** How far from the saved address a search may reach, in miles each way. */
-const NEARBY_MILES = 25;
+/**
+ * How far from the saved address a "near me" search looks first, in miles
+ * each way. Google ranks what it finds by how well it matches the words, not
+ * by distance, and sends twenty; across a whole metro area those twenty
+ * can skip the closest places that fit (reported 2026-11-25: "pasta near me"
+ * from north Fresno came back with places 7 and 9 miles off, and none of the
+ * Italian restaurants nearer).
+ */
+export const LOCAL_MILES = 6;
+/** How far from the saved address a search may reach at most, in miles each way, when the closer look found too little. */
+export const NEARBY_MILES = 25;
+/** Fewer places than this from the closer look, and the search widens to NEARBY_MILES. */
+export const ENOUGH_NEARBY = 8;
 /** How far around a named landmark, venue or neighborhood a search may reach. */
 const AROUND_SPOT_MILES = 4;
 /** How far around a named city or town. */
@@ -317,6 +328,8 @@ export interface PlaceSearch {
   query: string;
   /** Search only around here. */
   near?: Point | null;
+  /** How far around `near` to look, in miles each way. NEARBY_MILES unless given. */
+  miles?: number;
   /** Lean toward here without being held to it: for a place named by name, which may be in another city altogether. Ignored when `near`, `area` or `anchor` is given. */
   bias?: Point | null;
   /** A neighbourhood, city or ZIP the person named, searched instead of `near`. Used as words when there is no `anchor` for it. */
@@ -351,7 +364,7 @@ export async function searchPlaces(search: PlaceSearch): Promise<Place[]> {
       ...(anchor
         ? { locationRestriction: boxAround(anchor.point, anchor.wide ? AROUND_CITY_MILES : AROUND_SPOT_MILES) }
         : !area && search.near
-          ? { locationRestriction: boxAround(search.near) }
+          ? { locationRestriction: boxAround(search.near, search.miles ?? NEARBY_MILES) }
           : !area && search.bias
             ? { locationBias: { circle: { center: { latitude: search.bias.lat, longitude: search.bias.lng }, radius: 50000 } } }
             : {}),
@@ -388,6 +401,42 @@ export async function searchPlaces(search: PlaceSearch): Promise<Place[]> {
       timeZone: p.timeZone?.id?.trim() || null,
       ...(travel ? { travel } : {}),
     }));
+}
+
+/**
+ * Several searches' results as one list: each list's first, then each
+ * list's second, and so on, so every search keeps its best matches; a place
+ * found twice is kept once (from the earlier list); at most `cap` places.
+ */
+export function mergeResults(lists: Place[][], cap: number): Place[] {
+  const seen = new Set<string>();
+  const out: Place[] = [];
+  const longest = Math.max(0, ...lists.map((l) => l.length));
+  for (let i = 0; i < longest && out.length < cap; i++) {
+    for (const list of lists) {
+      const place = list[i];
+      if (!place || seen.has(place.id)) continue;
+      seen.add(place.id);
+      out.push(place);
+      if (out.length >= cap) break;
+    }
+  }
+  return out;
+}
+
+/**
+ * Runs a search for each of `queries` (the dish and the cuisine known for
+ * it) and merges them. Near the saved address it looks within LOCAL_MILES
+ * first and adds a NEARBY_MILES look only when that found fewer than
+ * ENOUGH_NEARBY places, closer ones kept first. Around a named area or spot
+ * it searches once, as `search` says.
+ */
+export async function searchCloseFirst(search: PlaceSearch, queries: string[], cap: number): Promise<{ places: Place[]; widened: boolean }> {
+  const all = async (miles?: number) => mergeResults(await Promise.all(queries.map((query) => searchPlaces({ ...search, query, ...(miles ? { miles } : {}) }))), cap);
+  const nearMe = !search.area && !search.anchor && Boolean(search.near);
+  const close = await all(nearMe ? LOCAL_MILES : undefined);
+  if (!nearMe || close.length >= ENOUGH_NEARBY) return { places: close, widened: false };
+  return { places: mergeResults([[...close, ...(await all(NEARBY_MILES))]], cap), widened: true };
 }
 
 /** Straight-line miles between two points, to one decimal place. */
